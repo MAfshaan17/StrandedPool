@@ -122,6 +122,19 @@ h2 { margin-bottom: 0; font-size: 18px; letter-spacing: -.35px; }
 .report-copy > strong { font-size: 13px; }
 .report-copy > p { margin: 5px 0 8px; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .report-meta, .option-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; color: #859397; font-size: 10px; }
+.weather-panel { margin-bottom: 18px; }
+.weather-search { display: flex; align-items: flex-end; gap: 12px; max-width: 620px; margin-bottom: 16px; }
+.weather-search .form-field { flex: 1; }
+.weather-search .button { flex: 0 0 auto; }
+.weather-results { display: grid; gap: 13px; }
+.weather-risk { display: grid; gap: 5px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 9px; font-size: 11px; line-height: 1.5; }
+.weather-risk span { color: var(--muted); }
+.weather-risk-low { border-color: #d4e8dd; background: #f2faf5; }
+.weather-risk-moderate { border-color: #f1dfb9; background: #fffaf0; }
+.weather-risk-high { border-color: #f0d2c7; background: #fff7f3; }
+.weather-hours { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 9px; margin: 0; padding: 0; list-style: none; }
+.weather-hours li { display: grid; gap: 5px; padding: 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.weather-hours strong { color: var(--ink); font-size: 11px; }
 .tag { display: inline-flex; align-items: center; border-radius: 99px; padding: 4px 7px; font-size: 9px; font-weight: 700; }
 .tag-amber { background: #fff4e7; color: #a26627; }
 .tag-blue { background: #eaf3f7; color: #487086; }
@@ -182,6 +195,7 @@ h2 { margin-bottom: 0; font-size: 18px; letter-spacing: -.35px; }
   .dashboard-grid, .recovery-grid, .workbench { grid-template-columns: 1fr; }
   .alternatives-layout { grid-template-columns: 1fr; }
   .footer { flex-direction: column; }
+  .weather-search { align-items: stretch; flex-direction: column; }
 }
 @media (max-width: 430px) {
   .shell { width: calc(100% - 24px); }

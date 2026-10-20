@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 async def health_check():
     return {"status": "ok", "environment": settings.app_env}
 
+
 @router.get("/health/ready", tags=["Health"])
 async def readiness_check(db: AsyncSession = Depends(get_db)):
     try:

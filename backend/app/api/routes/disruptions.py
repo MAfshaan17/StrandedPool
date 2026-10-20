@@ -12,7 +12,9 @@ router = APIRouter()
 
 @router.get("/disruptions", response_model=list[DisruptionRead], tags=["Disruptions"])
 async def list_disruptions(db: AsyncSession = Depends(get_db)):
-    result = await db.scalars(select(Disruption).order_by(Disruption.reported_at.desc()))
+    result = await db.scalars(
+        select(Disruption).order_by(Disruption.reported_at.desc(), Disruption.id.desc())
+    )
     return result.all()
 
 

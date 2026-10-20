@@ -9,6 +9,7 @@ import {
   JourneyBooking,
   RecoveryPlan,
   TransportSearchResult,
+  WeatherForecast,
 } from "../lib/api";
 
 function toIsoDate(value: string): string {
@@ -45,6 +46,10 @@ export default function Home() {
   const [bookingError, setBookingError] = useState("");
   const [searchMessage, setSearchMessage] = useState("");
   const [searching, setSearching] = useState(false);
+  const [weatherLocation, setWeatherLocation] = useState("");
+  const [weatherForecast, setWeatherForecast] = useState<WeatherForecast | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState("");
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -262,6 +267,32 @@ export default function Home() {
     }
   }
 
+  async function searchWeather(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const location = weatherLocation.trim() || selectedJourney?.origin;
+    if (!location) {
+      setWeatherError("Enter a city or select a journey to check its origin.");
+      return;
+    }
+    setWeatherLoading(true);
+    setWeatherError("");
+    try {
+      const params = new URLSearchParams({ location });
+      setWeatherForecast(
+        await apiRequest<WeatherForecast>(
+          `/api/v1/weather/forecast?${params.toString()}`,
+        ),
+      );
+    } catch (error) {
+      setWeatherForecast(null);
+      setWeatherError(
+        error instanceof Error ? error.message : "Unable to load the weather forecast.",
+      );
+    } finally {
+      setWeatherLoading(false);
+    }
+  }
+
   const selectedJourney = dashboard?.journeys.find(
     (journey) => String(journey.id) === selectedJourneyId,
   );
@@ -405,6 +436,64 @@ export default function Home() {
             </p>
           )}
         </div>
+      </section>
+
+      <section className="panel weather-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">WEATHER OUTLOOK</p>
+            <h2>Forecast-based risk estimate</h2>
+            <p className="section-subtitle">
+              Weather can affect travel, but this estimate does not verify a transport disruption.
+            </p>
+          </div>
+          <span className="panel-icon">WX</span>
+        </div>
+        <form className="weather-search" onSubmit={searchWeather}>
+          <label className="form-field">
+            <span>City or location</span>
+            <input
+              className="input"
+              value={weatherLocation}
+              onChange={(event) => setWeatherLocation(event.target.value)}
+              maxLength={120}
+              minLength={2}
+              placeholder={selectedJourney?.origin || "e.g. Mangaluru"}
+            />
+          </label>
+          <button className="button button-primary" type="submit" disabled={weatherLoading}>
+            {weatherLoading ? "Checking…" : "Check forecast"}
+          </button>
+        </form>
+        {weatherError && <p className="form-error" role="alert">{weatherError}</p>}
+        {weatherForecast?.status === "unavailable" && (
+          <p className="empty-copy" role="status">{weatherForecast.notice}</p>
+        )}
+        {weatherForecast?.status === "available" && weatherForecast.risk && (
+          <div className="weather-results" aria-live="polite">
+            <div className={`weather-risk weather-risk-${weatherForecast.risk.level}`}>
+              <strong>
+                {weatherForecast.risk.level} estimated weather risk · {weatherForecast.location?.name}
+                {weatherForecast.location?.country ? `, ${weatherForecast.location.country}` : ""}
+              </strong>
+              <span>{weatherForecast.data_freshness} · {weatherForecast.source}</span>
+              {weatherForecast.risk.drivers.length > 0 && (
+                <span>{weatherForecast.risk.drivers.join("; ")}</span>
+              )}
+            </div>
+            <ul className="weather-hours">
+              {weatherForecast.hours.map((hour) => (
+                <li key={hour.time}>
+                  <strong>{formatDate(hour.time)}</strong>
+                  <span>{hour.condition}</span>
+                  <span>Rain chance {hour.precipitation_probability_percent}%</span>
+                  <span>{hour.precipitation_mm} mm · wind {hour.wind_speed_kmh} km/h</span>
+                </li>
+              ))}
+            </ul>
+            <p className="form-hint">{weatherForecast.notice}</p>
+          </div>
+        )}
       </section>
 
       <section className="workbench">

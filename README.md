@@ -1,9 +1,9 @@
 # 🚆 StrandedPool
-### Predict, Pool & Recover Travel Disruptions with AI
+### Travel disruption recovery, together
 
-**StrandedPool is an AI-powered travel disruption recovery system that helps stranded travellers find alternatives, protect downstream bookings, and coordinate recovery for entire groups—not just individuals.**
+**StrandedPool is an early-stage travel recovery MVP.** It stores journeys, traveller-reported disruptions, bookings, and user-entered alternatives; ranks the entered alternatives; and now retrieves Open-Meteo weather forecasts with an explicitly estimated risk indicator. Live transport inventory, booking cascade analysis, authentication, booking execution, and the AI assistant described in the product vision are not implemented yet.
 
-When a train is cancelled, a flight is delayed, or severe weather disrupts travel, passengers often struggle to find alternatives while seats become scarce and prices rise. StrandedPool combines AI agents, real-time travel data, constraint-based optimization, and group pooling to make recovery faster, smarter, and more accessible.
+The long-term product vision is to help travellers find authorized alternatives, protect downstream bookings, and coordinate recovery for groups—not just individuals.
 
 > **Our vision:** Turn travel disruptions into coordinated recovery plans instead of individual travel emergencies.
 
@@ -24,9 +24,9 @@ Travellers need a system that can:
 - Coordinate travellers with similar needs.
 - Generate a clear recovery itinerary with actionable next steps.
 
-## 💡 Our Solution
+## 💡 Product Direction
 
-StrandedPool uses a hybrid AI architecture combining language models with deterministic optimization and verified data sources.
+The intended product uses a hybrid architecture combining language models with deterministic optimization and verified data sources. The current implementation status is summarized under [Key Features](#-key-features) and [MVP scope and data accuracy](#mvp-scope-and-data-accuracy).
 
 ### 🔮 1. Predict
 
@@ -60,19 +60,27 @@ StrandedPool uses a hybrid AI architecture combining language models with determ
 
 | Feature | Description |
 |---|---|
-| Disruption detection | Identify or simulate delays, cancellations, and weather-related disruptions. |
-| Booking cascade analysis | Determine which downstream bookings may be affected. |
-| Alternative discovery | Search supported data sources for alternative transport and accommodation. |
-| Constraint-based ranking | Rank options using cost, travel time, deadlines, and traveller preferences. |
-| Group pooling | Identify compatible travellers and propose shared transport. |
-| Recovery itinerary | Present the original journey alongside the proposed recovery plan. |
-| Action pack | Generate ready-to-review messages for hotels, transport providers, and refund requests. |
-| Multilingual assistance | Support conversational recovery workflows in English, Hindi, and Kannada. |
+| Disruption reports | Save traveller-reported disruptions; these are not verified against transport operators. |
+| Weather forecast | View a six-hour Open-Meteo forecast and transparent estimated weather-risk indicator. |
+| Booking cascade analysis | Not implemented yet; the MVP stores booking details but does not evaluate dependencies. |
+| Alternative discovery | Live transport search reports when no authorized provider is configured; traveller-entered options can be ranked. |
+| Constraint-based ranking | Deterministically rank traveller-entered options against destination, stated budget, deadline, and stated constraints. |
+| Group pooling | Show limited proposals for journeys with matching destinations and departure times; consent, capacity, and fares are not verified. |
+| Recovery itinerary | Show saved reports, bookings, alternatives, and general next steps; automated cascade-based plans are not implemented. |
+| Action pack | Not implemented yet; messages are not sent or automatically drafted. |
+| Multilingual assistance | Not implemented yet. |
+
+### Implemented weather integration
+
+`GET /api/v1/weather/forecast?location=Mangaluru` geocodes the requested place and retrieves hourly precipitation probability, precipitation, wind speed, and weather codes from Open-Meteo. The API returns the next six forecast hours and a deterministic low/moderate/high risk estimate with the thresholds and contributing factors in the response. Results are cached in process memory for 15 minutes. If the provider is unavailable, the endpoint returns an explicit unavailable result or clearly labelled stale cached data.
+
+Open-Meteo forecasts are weather forecasts, not transport status. The risk estimate does not confirm a service delay, cancellation, or unsafe route. Open-Meteo's public forecast API does not require a key for this integration.
 
 ---
 
-## 🏗️ System Architecture
+## 🏗️ Target System Architecture
 
+The diagram below describes the planned architecture; several components are not implemented in the current MVP.
 ```text
               Traveller
              Chat / Voice
@@ -142,13 +150,13 @@ The AI must not invent seat availability, fares, train status, or hotel inventor
 
 StrandedPool is designed to integrate real data wherever authorized access is available.
 
-- **Weather:** Open-Meteo provides weather forecasts and related environmental data.
+- **Weather:** The MVP calls Open-Meteo geocoding and forecast endpoints without an API key; results and estimated risk are not transport alerts.
 - **Railways:** Evaluate Qrail and official railway data services for supported train information.
 - **Flights:** Use Amadeus APIs for supported flight searches and test-environment demonstrations.
 - **Routes:** Use OpenStreetMap-based routing services or Google Maps Platform.
 - **Bus, cab, and hotel inventory:** Integrate authorized operator or booking-partner APIs when available.
 
-**Important:** Free quotas, API keys, live-data access, commercial-use permissions, and booking capabilities vary by provider. A test API response is not proof of live availability. The application should identify live, cached, simulated, and unavailable data separately.
+**Important:** Free quotas, API keys, live-data access, commercial-use permissions, and booking capabilities vary by provider. A test API response is not proof of live availability. The MVP currently has no connected live transport inventory, railway status, flight status, routing, or accommodation provider.
 
 ---
 
@@ -213,7 +221,7 @@ Compare individual recommendations against group-aware pooling using the same in
 - Python 3.11 or a compatible supported version.
 - Node.js and npm.
 - Git.
-- API keys for whichever external providers you choose to integrate.
+- API keys only for optional providers you later configure; the current Open-Meteo forecast integration does not require one.
 
 ### 1. Clone the repository
 
@@ -226,7 +234,7 @@ cd StrandedPool
 
 ```powershell
 cd backend
-py -3.11 -m venv .venv
+py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\alembic.exe upgrade head
 .\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8000
@@ -254,6 +262,7 @@ npm run dev -- --port 3001
 
 Open `http://localhost:3001`.
 If port 3001 is occupied, use `npm run dev -- --port 3002` instead.
+If both are occupied, use the next free port (CORS also allows port 3003).
 
 ---
 
@@ -263,21 +272,22 @@ The backend uses safe local defaults. Optionally copy `backend/.env.example` to 
 
 ```env
 APP_ENV=development
-FRONTEND_ORIGIN=http://localhost:3001
+FRONTEND_ORIGIN=http://localhost:3001,http://localhost:3002,http://localhost:3003
 DATABASE_URL=sqlite+aiosqlite:///./strandedpool.db
 ```
 
-The frontend defaults to `http://localhost:8000`; set `NEXT_PUBLIC_API_BASE_URL` only if the backend uses a different address. No third-party API keys are currently used.
+The frontend defaults to `http://localhost:8000`; set `NEXT_PUBLIC_API_BASE_URL` only if the backend uses a different address. The current weather integration needs no API key; no transport, AI, or mapping credentials are configured.
 
 Never commit `.env` files, API secrets, personal booking information, or access tokens to GitHub. Use environment variables and a committed `.env.example` containing placeholders.
 
 ### MVP scope and data accuracy
 
 - Journey and booking details, disruption reports, and alternative options are stored in local SQLite.
+- Weather forecasts are fetched from Open-Meteo and cached in process memory for 15 minutes; no weather history is persisted.
 - Disruption reports and traveller-entered transport alternatives are explicitly unverified.
 - Alternative ranking is deterministic and uses the destination, stated budget, and arrival deadline when supplied.
 - Pooling matches are proposals based on destination and departure time only; they do not confirm consent, vehicle capacity, fare, or availability.
-- There is no live transport provider, authentication, encryption, or booking execution in this MVP. Do not enter booking references or sensitive personal information.
+- Dependency cascade analysis, trip simulation, authentication, encryption, and booking execution are not implemented. There is no live transport provider. Do not enter booking references or sensitive personal information.
 
 ---
 
@@ -293,7 +303,7 @@ Before deploying StrandedPool, validate:
 - AI-generated messages and itinerary consistency.
 - Authentication, input validation, and protection of traveller information.
 
-Use mock fixtures for repeatable automated tests, even when production integrations use real data. Mock data is useful for testing; it should not be confused with live travel inventory.
+Run the backend tests from `backend` with `.venv\Scripts\python.exe -m pytest -q --basetemp=.pytest-tmp tests`. Run frontend checks from `frontend` with `npm run lint` and `npm run build`. The weather tests use mocked provider responses for repeatability; do not confuse simulated test data with live transport inventory.
 
 ---
 

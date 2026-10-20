@@ -3,8 +3,7 @@ from pathlib import Path
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ..core.config import BACKEND_DIR
-from ..core.config import settings
+from ..core.config import BACKEND_DIR, settings
 
 database_url = make_url(settings.database_url)
 if database_url.get_backend_name() == "sqlite":

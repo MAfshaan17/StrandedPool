@@ -11,7 +11,9 @@ router = APIRouter()
 
 @router.get("/journeys", response_model=list[JourneyRead], tags=["Journeys"])
 async def list_journeys(db: AsyncSession = Depends(get_db)):
-    result = await db.scalars(select(Journey).order_by(Journey.departure_at))
+    result = await db.scalars(
+        select(Journey).order_by(Journey.departure_at, Journey.id)
+    )
     return result.all()
 
 

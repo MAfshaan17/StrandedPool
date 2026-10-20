@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,7 +62,9 @@ async def add_alternative(
 async def list_alternatives(journey_id: int, db: AsyncSession = Depends(get_db)):
     journey = await get_journey_or_404(journey_id, db)
     alternatives = await db.scalars(
-        select(Alternative).where(Alternative.journey_id == journey_id)
+        select(Alternative)
+        .where(Alternative.journey_id == journey_id)
+        .order_by(Alternative.id)
     )
     scored = [score_alternative(item, journey) for item in alternatives.all()]
     return sorted(scored, key=lambda item: item["score"], reverse=True)
@@ -74,10 +76,12 @@ async def get_recovery_plan(journey_id: int, db: AsyncSession = Depends(get_db))
     disruptions = await db.scalars(
         select(Disruption)
         .where(Disruption.journey_id == journey_id)
-        .order_by(Disruption.reported_at.desc())
+        .order_by(Disruption.reported_at.desc(), Disruption.id.desc())
     )
     alternatives = await db.scalars(
-        select(Alternative).where(Alternative.journey_id == journey_id)
+        select(Alternative)
+        .where(Alternative.journey_id == journey_id)
+        .order_by(Alternative.id)
     )
     bookings = await db.scalars(
         select(JourneyBooking)
@@ -85,12 +89,13 @@ async def get_recovery_plan(journey_id: int, db: AsyncSession = Depends(get_db))
         .order_by(JourneyBooking.created_at)
     )
     other_journeys = await db.scalars(
-        select(Journey).where(Journey.id != journey_id)
+        select(Journey)
+        .where(Journey.id != journey_id)
+        .order_by(Journey.departure_at, Journey.id)
     )
     ranked = sorted(
         (score_alternative(item, journey) for item in alternatives.all()),
-        key=lambda item: item["score"],
-        reverse=True,
+        key=lambda item: (-item["score"], item["id"]),
     )
     pooling_matches = [
         {"journey_id": item.id, "traveller_name": item.traveller_name}
@@ -123,12 +128,16 @@ async def get_recovery_plan(journey_id: int, db: AsyncSession = Depends(get_db))
 
 @router.get("/dashboard", tags=["Dashboard"])
 async def get_dashboard(db: AsyncSession = Depends(get_db)):
-    journeys = await db.scalars(select(Journey).order_by(Journey.departure_at))
+    journeys = await db.scalars(
+        select(Journey).order_by(Journey.departure_at, Journey.id)
+    )
     disruption_count = await db.scalar(
         select(func.count()).select_from(Disruption)
     )
     disruptions = await db.scalars(
-        select(Disruption).order_by(Disruption.reported_at.desc()).limit(5)
+        select(Disruption)
+        .order_by(Disruption.reported_at.desc(), Disruption.id.desc())
+        .limit(5)
     )
     journey_list = journeys.all()
     disruption_list = disruptions.all()

@@ -89,6 +89,37 @@ export interface TransportSearchResult {
   message: string;
 }
 
+export interface WeatherHour {
+  time: string;
+  precipitation_probability_percent: number;
+  precipitation_mm: number;
+  wind_speed_kmh: number;
+  weather_code: number;
+  condition: string;
+}
+
+export interface WeatherForecast {
+  status: "available" | "unavailable";
+  source: "Open-Meteo";
+  data_freshness: string;
+  location?: {
+    name: string;
+    country: string | null;
+    latitude: number;
+    longitude: number;
+    timezone: string;
+  };
+  fetched_at?: string;
+  risk: {
+    level: "low" | "moderate" | "high";
+    window_hours: number;
+    drivers: string[];
+    method: string;
+  } | null;
+  hours: WeatherHour[];
+  notice: string;
+}
+
 export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
