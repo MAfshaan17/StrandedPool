@@ -224,75 +224,60 @@ cd StrandedPool
 
 ### 2. Set up the backend
 
-```bash
-python -m venv .venv
-```
-
-Activate the environment:
-
-**Windows PowerShell**
 ```powershell
-.\.venv\Scripts\Activate.ps1
+cd backend
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\alembic.exe upgrade head
+.\.venv\Scripts\uvicorn.exe app.main:app --reload --port 8000
 ```
 
-**macOS / Linux**
-```bash
-source .venv/bin/activate
-```
+If you already have a compatible venv, reuse it and run the install, migration, and server commands from the `backend` directory.
 
-Install the backend dependencies once `requirements.txt` is configured:
-
-```bash
-pip install -r requirements.txt
-```
-
-Start the FastAPI server using the configured application entry point:
-
-```bash
-uvicorn app.main:app --reload
-```
-
-The example assumes your FastAPI application is located at `app/main.py`. Adjust the command to match the actual repository structure.
-
-API documentation is normally available at:
+The API documentation and health checks are available at:
 
 ```text
-http://127.0.0.1:8000/docs
+http://localhost:8000/docs
+http://localhost:8000/health
+http://localhost:8000/api/health/ready
 ```
 
 ### 3. Set up the frontend
 
-```bash
-cd frontend
-npm install
-npm run dev
+Create `frontend/.env.local` with `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`, then run:
+
+```powershell
+cd ..\frontend
+npm ci
+npm run dev -- --port 3001
 ```
 
-Open the local URL printed by your Next.js development server.
-
-These commands describe the intended setup; the frontend directory, dependency files, and application entry points must exist in your implementation.
+Open `http://localhost:3001`.
+If port 3001 is occupied, use `npm run dev -- --port 3002` instead.
 
 ---
 
 ## 🔐 Environment Variables
 
-Create a local `.env` file for backend configuration.
+The backend uses safe local defaults. Optionally copy `backend/.env.example` to `backend/.env` to customize:
 
 ```env
 APP_ENV=development
-
-DATABASE_URL=sqlite:///./strandedpool.db
-
-GEMINI_API_KEY=your_gemini_api_key
-AMADEUS_CLIENT_ID=your_amadeus_client_id
-AMADEUS_CLIENT_SECRET=your_amadeus_client_secret
-
-WEATHER_API_BASE_URL=https://api.open-meteo.com/v1/forecast
+FRONTEND_ORIGIN=http://localhost:3001
+DATABASE_URL=sqlite+aiosqlite:///./strandedpool.db
 ```
 
-Add only the credentials required by your selected integrations. Open-Meteo does not normally require a key for its free non-commercial API.
+The frontend defaults to `http://localhost:8000`; set `NEXT_PUBLIC_API_BASE_URL` only if the backend uses a different address. No third-party API keys are currently used.
 
 Never commit `.env` files, API secrets, personal booking information, or access tokens to GitHub. Use environment variables and a committed `.env.example` containing placeholders.
+
+### MVP scope and data accuracy
+
+- Journey and booking details, disruption reports, and alternative options are stored in local SQLite.
+- Disruption reports and traveller-entered transport alternatives are explicitly unverified.
+- Alternative ranking is deterministic and uses the destination, stated budget, and arrival deadline when supplied.
+- Pooling matches are proposals based on destination and departure time only; they do not confirm consent, vehicle capacity, fare, or availability.
+- There is no live transport provider, authentication, encryption, or booking execution in this MVP. Do not enter booking references or sensitive personal information.
 
 ---
 

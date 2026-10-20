@@ -1,0 +1,20 @@
+# General
+node_modules/
+.next/
+out/
+/dist/
+/.env
+.env.*
+!.env.example
+*.pyc
+__pycache__/
+.DS_Store
+
+# Python
+*.sqlite3
+*.db
+.venv/
+.env
+
+# Logs
+*.log

@@ -1,0 +1,685 @@
+"use client";
+
+import { FormEvent, useCallback, useEffect, useState } from "react";
+
+import {
+  apiRequest,
+  Alternative,
+  Dashboard,
+  JourneyBooking,
+  RecoveryPlan,
+  TransportSearchResult,
+} from "../lib/api";
+
+function toIsoDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Enter a valid date and time.");
+  }
+  return date.toISOString();
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "Not provided";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function formatFare(value: number | null): string {
+  return value === null ? "Not provided" : value.toLocaleString();
+}
+
+export default function Home() {
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [selectedJourneyId, setSelectedJourneyId] = useState("");
+  const [recovery, setRecovery] = useState<RecoveryPlan | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [apiError, setApiError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [journeyError, setJourneyError] = useState("");
+  const [disruptionError, setDisruptionError] = useState("");
+  const [alternativeError, setAlternativeError] = useState("");
+  const [bookingError, setBookingError] = useState("");
+  const [searchMessage, setSearchMessage] = useState("");
+  const [searching, setSearching] = useState(false);
+
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = await apiRequest<Dashboard>("/api/dashboard");
+      setDashboard(result);
+      setApiError("");
+      setSelectedJourneyId((current) =>
+        result.journeys.some((journey) => String(journey.id) === current)
+          ? current
+          : result.journeys[0]
+            ? String(result.journeys[0].id)
+            : "",
+      );
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : "Unable to load the dashboard.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    if (!selectedJourneyId) {
+      setRecovery(null);
+      return;
+    }
+    let active = true;
+    apiRequest<RecoveryPlan>(`/api/journeys/${selectedJourneyId}/recovery`)
+      .then((plan) => {
+        if (active) {
+          setRecovery(plan);
+          setApiError("");
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setRecovery(null);
+          setApiError(error instanceof Error ? error.message : "Unable to load recovery details.");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedJourneyId, dashboard?.journeys.length]);
+
+  async function submitJourney(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    setSaving(true);
+    setJourneyError("");
+    setNotice("");
+    const form = new FormData(event.currentTarget);
+    try {
+      const journey = await apiRequest<{ id: number }>("/api/journeys", {
+        method: "POST",
+        body: JSON.stringify({
+          traveller_name: form.get("traveller_name"),
+          origin: form.get("origin"),
+          destination: form.get("destination"),
+          departure_at: toIsoDate(String(form.get("departure_at"))),
+          arrive_by: form.get("arrive_by")
+            ? toIsoDate(String(form.get("arrive_by")))
+            : null,
+          budget_amount: form.get("budget_amount")
+            ? Number(form.get("budget_amount"))
+            : null,
+          constraints: String(form.get("constraints") ?? "")
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean),
+        }),
+      });
+      formElement.reset();
+      setSelectedJourneyId(String(journey.id));
+      setNotice("Journey saved.");
+      await loadDashboard();
+      setSelectedJourneyId(String(journey.id));
+    } catch (error) {
+      setJourneyError(error instanceof Error ? error.message : "Unable to save this journey.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitDisruption(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    setSaving(true);
+    setDisruptionError("");
+    setNotice("");
+    const form = new FormData(event.currentTarget);
+    try {
+      await apiRequest("/api/disruptions", {
+        method: "POST",
+        body: JSON.stringify({
+          journey_id: selectedJourneyId ? Number(selectedJourneyId) : null,
+          title: form.get("title"),
+          description: form.get("description"),
+          transport_mode: form.get("transport_mode") || null,
+        }),
+      });
+      formElement.reset();
+      setNotice("Disruption report saved as unverified.");
+      await loadDashboard();
+    } catch (error) {
+      setDisruptionError(
+        error instanceof Error ? error.message : "Unable to save this disruption report.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitAlternative(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedJourneyId) return;
+    const formElement = event.currentTarget;
+    setSaving(true);
+    setAlternativeError("");
+    setNotice("");
+    const form = new FormData(event.currentTarget);
+    try {
+      await apiRequest<Alternative>(
+        `/api/journeys/${selectedJourneyId}/alternatives`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            mode: form.get("mode"),
+            provider: form.get("provider"),
+            origin: form.get("origin"),
+            destination: form.get("destination"),
+            arrival_at: form.get("arrival_at")
+              ? toIsoDate(String(form.get("arrival_at")))
+              : null,
+            fare_amount: form.get("fare_amount")
+              ? Number(form.get("fare_amount"))
+              : null,
+            constraints_satisfied: String(form.get("constraints_satisfied") ?? "")
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean),
+          }),
+        },
+      );
+      formElement.reset();
+      setNotice("Alternative saved and ranked. Details are traveller-provided, not verified.");
+      setRecovery(await apiRequest<RecoveryPlan>(
+        `/api/journeys/${selectedJourneyId}/recovery`,
+      ));
+    } catch (error) {
+      setAlternativeError(
+        error instanceof Error ? error.message : "Unable to save this alternative.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitBooking(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedJourneyId) return;
+    const formElement = event.currentTarget;
+    setSaving(true);
+    setBookingError("");
+    setNotice("");
+    const form = new FormData(formElement);
+    try {
+      await apiRequest<JourneyBooking>(
+        `/api/journeys/${selectedJourneyId}/bookings`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            kind: form.get("kind"),
+            provider: form.get("provider"),
+            details: form.get("details") || null,
+          }),
+        },
+      );
+      formElement.reset();
+      setNotice("Booking detail saved.");
+      setRecovery(await apiRequest<RecoveryPlan>(
+        `/api/journeys/${selectedJourneyId}/recovery`,
+      ));
+    } catch (error) {
+      setBookingError(error instanceof Error ? error.message : "Unable to save this booking.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function searchTransport() {
+    if (!selectedJourney) return;
+    setSearching(true);
+    setSearchMessage("");
+    setAlternativeError("");
+    try {
+      const params = new URLSearchParams({
+        origin: selectedJourney.origin,
+        destination: selectedJourney.destination,
+      });
+      const result = await apiRequest<TransportSearchResult>(
+        `/api/transport/search?${params.toString()}`,
+      );
+      setSearchMessage(result.message);
+    } catch (error) {
+      setAlternativeError(
+        error instanceof Error ? error.message : "Transport search is unavailable.",
+      );
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  const selectedJourney = dashboard?.journeys.find(
+    (journey) => String(journey.id) === selectedJourneyId,
+  );
+  const statusText = loading ? "Connecting" : apiError ? "Needs attention" : "Connected";
+
+  return (
+    <main className="shell">
+      <header className="topbar">
+        <a className="brand" href="#" aria-label="StrandedPool home">
+          <span className="brand-mark">S</span>
+          <span>stranded<span className="brand-accent">pool</span></span>
+        </a>
+        <div className={`connection ${apiError ? "connection-error" : ""}`}>
+          <span className="connection-dot" />
+          API {statusText}
+        </div>
+      </header>
+
+      <section className="hero">
+        <div className="hero-copy">
+          <p className="eyebrow">TRAVEL RECOVERY, TOGETHER</p>
+          <h1>When plans change,<br /><span>find your next move.</span></h1>
+          <p className="hero-description">
+            Keep journeys, disruption reports and practical recovery steps in one place.
+          </p>
+        </div>
+        <div className="hero-stats" aria-label="Dashboard totals">
+          <div className="hero-stat">
+            <span className="stat-number">{dashboard?.journey_count ?? "—"}</span>
+            <span className="stat-label">Journeys</span>
+          </div>
+          <div className="hero-stat">
+            <span className="stat-number">{dashboard?.disruption_count ?? "—"}</span>
+            <span className="stat-label">Reports</span>
+          </div>
+        </div>
+      </section>
+
+      {apiError && (
+        <div className="alert alert-error" role="alert">
+          <strong>Dashboard unavailable</strong>
+          <span>{apiError}</span>
+          <button className="text-button" onClick={() => void loadDashboard()}>Try again</button>
+        </div>
+      )}
+      {notice && <div className="alert alert-success" role="status">{notice}</div>}
+
+      <div className="notice-bar">
+        <span className="notice-icon">i</span>
+        <span>
+          No live transport provider is connected. Reports and alternatives you add are
+          clearly marked as unverified; fares and availability are never assumed.
+        </span>
+      </div>
+
+      <section className="dashboard-grid">
+        <div className="panel journey-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">YOUR TRAVEL</p>
+              <h2>Journey details</h2>
+            </div>
+            <span className="panel-icon">01</span>
+          </div>
+          {dashboard?.journeys.length ? (
+            <>
+              <label className="field-label" htmlFor="journey-select">Choose a journey</label>
+              <select
+                id="journey-select"
+                className="input"
+                value={selectedJourneyId}
+                onChange={(event) => setSelectedJourneyId(event.target.value)}
+              >
+                {dashboard.journeys.map((journey) => (
+                  <option key={journey.id} value={journey.id}>
+                    {journey.origin} → {journey.destination} · {journey.traveller_name}
+                  </option>
+                ))}
+              </select>
+              {selectedJourney && (
+                <div className="journey-summary">
+                  <div className="route-line">
+                    <span className="route-point" />
+                    <div><strong>{selectedJourney.origin}</strong><small>Origin</small></div>
+                  </div>
+                  <div className="route-connector" />
+                  <div className="route-line">
+                    <span className="route-point route-point-end" />
+                    <div><strong>{selectedJourney.destination}</strong><small>Destination</small></div>
+                  </div>
+                  <div className="journey-meta">
+                    <span>Departure</span><strong>{formatDate(selectedJourney.departure_at)}</strong>
+                  </div>
+                  {selectedJourney.arrive_by && (
+                    <div className="journey-meta">
+                      <span>Arrive by</span><strong>{formatDate(selectedJourney.arrive_by)}</strong>
+                    </div>
+                  )}
+                  {selectedJourney.budget_amount !== null && (
+                    <div className="journey-meta">
+                      <span>Budget</span><strong>{selectedJourney.budget_amount.toLocaleString()}</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="empty-copy">
+              {loading ? "Loading journeys…" : "No journeys yet. Add one to start a recovery plan."}
+            </p>
+          )}
+        </div>
+
+        <div className="panel disruption-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">SITUATION UPDATE</p>
+              <h2>Recent reports</h2>
+            </div>
+            <span className="panel-icon">02</span>
+          </div>
+          {dashboard?.recent_disruptions.length ? (
+            <div className="report-list">
+              {dashboard.recent_disruptions.map((disruption) => (
+                <article className="report-item" key={disruption.id}>
+                  <span className="report-marker" />
+                  <div className="report-copy">
+                    <strong>{disruption.title}</strong>
+                    <p>{disruption.description}</p>
+                    <div className="report-meta">
+                      <span>{disruption.transport_mode || "Travel"} · {formatDate(disruption.reported_at)}</span>
+                      <span className="tag tag-amber">Unverified report</span>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="empty-copy">
+              {loading ? "Loading reports…" : "No disruption reports. Any report you add will be labelled unverified."}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="workbench">
+        <div className="panel form-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">BUILD YOUR RECOVERY</p>
+              <h2>Add trip information</h2>
+            </div>
+          </div>
+          <form className="form-grid" onSubmit={submitJourney}>
+            <label className="form-field">
+              <span>Display name</span>
+              <input className="input" name="traveller_name" maxLength={80} required placeholder="e.g. Alex" />
+            </label>
+            <label className="form-field">
+              <span>From</span>
+              <input className="input" name="origin" maxLength={120} required placeholder="Departure city" />
+            </label>
+            <label className="form-field">
+              <span>To</span>
+              <input className="input" name="destination" maxLength={120} required placeholder="Destination city" />
+            </label>
+            <label className="form-field">
+              <span>Departure</span>
+              <input className="input" name="departure_at" type="datetime-local" required />
+            </label>
+            <label className="form-field">
+              <span>Need to arrive by <em>Optional</em></span>
+              <input className="input" name="arrive_by" type="datetime-local" />
+            </label>
+            <label className="form-field">
+              <span>Budget <em>Optional</em></span>
+              <input className="input" name="budget_amount" type="number" min="0" step="0.01" placeholder="Amount" />
+            </label>
+            <label className="form-field form-field-wide">
+              <span>Constraints <em>Optional, comma-separated</em></span>
+              <input className="input" name="constraints" maxLength={500} placeholder="e.g. wheelchair access, no overnight travel" />
+            </label>
+            {journeyError && <p className="form-error form-field-wide" role="alert">{journeyError}</p>}
+            <button className="button button-primary form-field-wide" disabled={saving}>
+              {saving ? "Saving…" : "Save journey"}
+            </button>
+          </form>
+        </div>
+
+        <div className="panel form-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">REPORT A CHANGE</p>
+              <h2>Log a disruption</h2>
+            </div>
+          </div>
+          <form className="form-grid" onSubmit={submitDisruption}>
+            <label className="form-field form-field-wide">
+              <span>What happened?</span>
+              <input className="input" name="title" minLength={3} maxLength={120} required placeholder="e.g. Service cancellation reported" />
+            </label>
+            <label className="form-field form-field-wide">
+              <span>Details</span>
+              <textarea className="input textarea" name="description" minLength={3} maxLength={2000} required placeholder="Add what you know and when you heard it." />
+            </label>
+            <label className="form-field form-field-wide">
+              <span>Transport mode <em>Optional</em></span>
+              <select className="input" name="transport_mode" defaultValue="">
+                <option value="">Choose a mode</option>
+                <option value="train">Train</option>
+                <option value="bus">Bus</option>
+                <option value="flight">Flight</option>
+                <option value="road">Road</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            {disruptionError && <p className="form-error form-field-wide" role="alert">{disruptionError}</p>}
+            <button className="button button-secondary form-field-wide" disabled={saving}>
+              {saving ? "Saving…" : "Save disruption report"}
+            </button>
+          </form>
+        </div>
+
+        <div className="panel form-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">DOWNSTREAM PLANS</p>
+              <h2>Record a booking</h2>
+            </div>
+          </div>
+          <form className="form-grid" onSubmit={submitBooking}>
+            <label className="form-field form-field-wide">
+              <span>Booking type</span>
+              <select className="input" name="kind" defaultValue="transport">
+                <option value="transport">Transport</option>
+                <option value="accommodation">Accommodation</option>
+                <option value="connection">Connection</option>
+                <option value="appointment">Appointment</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label className="form-field form-field-wide">
+              <span>Provider</span>
+              <input className="input" name="provider" maxLength={120} required placeholder="Provider or service name" />
+            </label>
+            <label className="form-field form-field-wide">
+              <span>Notes <em>Optional</em></span>
+              <textarea className="input textarea" name="details" maxLength={2000} placeholder="Non-sensitive details about this booking." />
+            </label>
+            <p className="form-hint form-field-wide">This local MVP has no sign-in or encryption. Do not enter booking references or sensitive personal information.</p>
+            {bookingError && <p className="form-error form-field-wide" role="alert">{bookingError}</p>}
+            <button className="button button-secondary form-field-wide" disabled={saving || !selectedJourneyId}>
+              {saving ? "Saving…" : "Add booking"}
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <section className="panel alternatives-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">COMPARE WHAT YOU&apos;VE FOUND</p>
+            <h2>Alternative options</h2>
+            <p className="section-subtitle">Add options checked with a provider. We rank your details; we do not verify inventory.</p>
+          </div>
+          <span className="panel-icon">03</span>
+        </div>
+        <div className="search-status">
+          <button className="button button-secondary" type="button" onClick={searchTransport} disabled={!selectedJourney || searching}>
+            {searching ? "Checking…" : "Check live provider inventory"}
+          </button>
+          {searchMessage && <p className="empty-copy" role="status">{searchMessage}</p>}
+        </div>
+        <div className="alternatives-layout">
+          <form key={selectedJourneyId} className="form-grid alternative-form" onSubmit={submitAlternative}>
+            <label className="form-field">
+              <span>Mode</span>
+              <select className="input" name="mode" defaultValue="bus">
+                <option value="bus">Bus</option>
+                <option value="train">Train</option>
+                <option value="flight">Flight</option>
+                <option value="taxi">Taxi / shared ride</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Provider / source</span>
+              <input className="input" name="provider" required maxLength={120} placeholder="Where you checked" />
+            </label>
+            <label className="form-field">
+              <span>From</span>
+              <input className="input" name="origin" required maxLength={120} defaultValue={selectedJourney?.origin ?? ""} />
+            </label>
+            <label className="form-field">
+              <span>To</span>
+              <input className="input" name="destination" required maxLength={120} defaultValue={selectedJourney?.destination ?? ""} />
+            </label>
+            <label className="form-field">
+              <span>Arrival time <em>Optional</em></span>
+              <input className="input" name="arrival_at" type="datetime-local" />
+            </label>
+            <label className="form-field">
+              <span>Fare <em>Optional</em></span>
+              <input className="input" name="fare_amount" type="number" min="0" step="0.01" placeholder="Amount" />
+            </label>
+            <label className="form-field form-field-wide">
+              <span>Constraints this option appears to meet <em>Optional, comma-separated</em></span>
+              <input className="input" name="constraints_satisfied" placeholder="Match the constraints on your journey" />
+            </label>
+            {alternativeError && <p className="form-error form-field-wide" role="alert">{alternativeError}</p>}
+            <button className="button button-primary form-field-wide" disabled={saving || !selectedJourneyId}>
+              {saving ? "Saving…" : "Add and rank option"}
+            </button>
+          </form>
+          <div className="option-list">
+            {!selectedJourneyId ? (
+              <p className="empty-copy">Add a journey before comparing alternatives.</p>
+            ) : recovery?.alternatives.length ? (
+              recovery.alternatives.map((alternative) => (
+                <article className="option-card" key={alternative.id}>
+                  <div className="option-topline">
+                    <strong>{alternative.mode} · {alternative.provider}</strong>
+                    <span className="score-pill">{alternative.score}/100</span>
+                  </div>
+                  <p>{alternative.origin} → {alternative.destination}</p>
+                  <div className="option-facts">
+                    <span>Fare: {formatFare(alternative.fare_amount)}</span>
+                    <span>Arrives: {formatDate(alternative.arrival_at)}</span>
+                  </div>
+                  <div className="report-meta">
+                    <span>Entered {formatDate(alternative.entered_at)}</span>
+                    <span className="tag tag-blue">{alternative.source_label}</span>
+                    <span className="tag tag-amber">{alternative.data_freshness}</span>
+                  </div>
+                  <ul className="reason-list">
+                    {alternative.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                  </ul>
+                </article>
+              ))
+            ) : (
+              <p className="empty-copy">No alternative options added for this journey yet.</p>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="recovery-grid">
+        <div className="panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">PROPOSED NEXT STEPS</p>
+              <h2>Bookings &amp; next steps</h2>
+            </div>
+          </div>
+          {recovery ? (
+            <>
+              {recovery.bookings.length ? (
+                <div className="booking-list">
+                  {recovery.bookings.map((booking) => (
+                    <article className="booking-item" key={booking.id}>
+                      <span className="booking-kind">{booking.kind.slice(0, 1).toUpperCase()}</span>
+                      <div>
+                        <strong>{booking.provider}</strong>
+                        <span>{booking.kind}{booking.details ? ` · ${booking.details}` : ""}</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-copy">No downstream bookings recorded for this journey.</p>
+              )}
+              <ol className="steps-list steps-after-bookings">
+                {recovery.next_steps.map((step, index) => (
+                  <li key={step}>
+                    <span className="step-number">{String(index + 1).padStart(2, "0")}</span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </>
+          ) : (
+            <p className="empty-copy">Choose a journey to see bookings and recovery steps.</p>
+          )}
+        </div>
+        <div className="panel pool-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">COORDINATE, DON&apos;T ASSUME</p>
+              <h2>Pooling proposal</h2>
+            </div>
+          </div>
+          {recovery?.pooling.matches.length ? (
+            <>
+              <p className="pool-summary">Journeys with the same destination and a departure within two hours:</p>
+              <ul className="pool-list">
+                {recovery.pooling.matches.map((match) => (
+                  <li key={match.journey_id}>
+                    <span className="pool-avatar">{match.traveller_name.slice(0, 1).toUpperCase()}</span>
+                    <span>{match.traveller_name}<small>Journey #{match.journey_id}</small></span>
+                  </li>
+                ))}
+              </ul>
+              <p className="pool-disclaimer">Proposal only. No vehicle, seats, fare or consent is verified.</p>
+            </>
+          ) : (
+            <p className="empty-copy">
+              {selectedJourneyId
+                ? "No matching journeys yet. Similar destinations and departure times can form a coordination proposal."
+                : "Add a journey to check for compatible travellers."}
+            </p>
+          )}
+        </div>
+      </section>
+
+      <footer className="footer">
+        <span>StrandedPool · Plan carefully, confirm directly with providers.</span>
+        <span>Transport inventory is not connected.</span>
+      </footer>
+    </main>
+  );
+}
