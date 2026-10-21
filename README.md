@@ -73,7 +73,7 @@ The intended product uses a hybrid architecture combining language models with d
 
 ### Implemented weather integration
 
-`GET /api/v1/weather/forecast?location=Mangaluru` geocodes the requested place and retrieves hourly precipitation probability, precipitation, wind speed, and weather codes from Open-Meteo. The API returns the next six forecast hours and a deterministic low/moderate/high risk estimate with the thresholds and contributing factors in the response. Results are cached in process memory for 15 minutes. If the provider is unavailable, the endpoint returns an explicit unavailable result or clearly labelled stale cached data.
+The location picker asks for a country first, then suggests matching cities as you type. `GET /api/v1/weather/locations?query=Mang&country_code=IN` returns up to eight Open-Meteo geocoding matches; selecting one country-qualifies the location and prevents an ambiguous city in another country from being used. `GET /api/v1/weather/forecast?location=Mangaluru&country_code=IN` retrieves hourly precipitation probability, precipitation, wind speed, and weather codes for the selected country. The API returns the next six forecast hours and a deterministic low/moderate/high risk estimate with the thresholds and contributing factors in the response. Results are cached in process memory for 15 minutes. If the provider is unavailable, the endpoint returns an explicit unavailable result or clearly labelled stale cached data.
 
 Open-Meteo forecasts are weather forecasts, not transport status. The risk estimate does not confirm a service delay, cancellation, or unsafe route. Open-Meteo's public forecast API does not require a key for this integration.
 

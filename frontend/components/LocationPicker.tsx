@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { apiRequest, LocationSuggestion } from "../lib/api";
 import { countries, countryCodeForName } from "../lib/countries";
@@ -33,16 +33,19 @@ export default function LocationPicker({
   onLocationChange,
 }: LocationPickerProps) {
   const initialLocation = useMemo(() => getInitialLocation(defaultValue), [defaultValue]);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [city, setCity] = useState(initialLocation.city);
   const [countryCode, setCountryCode] = useState(initialLocation.countryCode);
+  const [cityConfirmed, setCityConfirmed] = useState(Boolean(initialLocation.countryCode));
   const [suggestions, setSuggestions] = useState<LocationSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [suggestionError, setSuggestionError] = useState("");
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
   const country = countries.find((item) => item.code === countryCode);
+  const id = `location-${name}-${useId().replace(/:/g, "")}`;
 
   useEffect(() => {
-    if (!countryCode || city.trim().length < 2) {
+    if (!countryCode || city.trim().length < 2 || cityConfirmed) {
       setSuggestions([]);
       setLoading(false);
       return;
@@ -81,7 +84,21 @@ export default function LocationPicker({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [city, countryCode]);
+  }, [city, cityConfirmed, countryCode]);
+
+  useEffect(() => {
+    const form = containerRef.current?.closest("form");
+    if (!form) return;
+    const resetLocation = () => {
+      setCity(initialLocation.city);
+      setCountryCode(initialLocation.countryCode);
+      setCityConfirmed(Boolean(initialLocation.countryCode));
+      setSuggestions([]);
+      setSuggestionError("");
+    };
+    form.addEventListener("reset", resetLocation);
+    return () => form.removeEventListener("reset", resetLocation);
+  }, [initialLocation]);
 
   const formattedLocation = city.trim() && country
     ? `${city.trim()}, ${country.name}`
@@ -97,24 +114,26 @@ export default function LocationPicker({
 
   function chooseSuggestion(suggestion: LocationSuggestion) {
     setCity(suggestion.name);
+    setCityConfirmed(true);
     setSuggestions([]);
     setSuggestionError("");
     updateLocation(suggestion.name, countryCode, true);
   }
 
   return (
-    <div className="form-field location-picker">
-      <label className="form-field" htmlFor={`${name}-country`}>
+    <div className="form-field location-picker" ref={containerRef}>
+      <label className="form-field" htmlFor={`${id}-country`}>
         <span>Country</span>
         <select
           className="input"
-          id={`${name}-country`}
+          id={`${id}-country`}
           value={countryCode}
           required={required}
           onChange={(event) => {
             const nextCountryCode = event.target.value;
             setCountryCode(nextCountryCode);
             setCity("");
+            setCityConfirmed(false);
             setSuggestions([]);
             setSuggestionError("");
             updateLocation("", nextCountryCode, false);
@@ -126,15 +145,16 @@ export default function LocationPicker({
           ))}
         </select>
       </label>
-      <label className="form-field" htmlFor={`${name}-city`}>
+      <label className="form-field" htmlFor={`${id}-city`}>
         <span>{label}</span>
         <input
           className="input"
-          id={`${name}-city`}
+          id={`${id}-city`}
           value={city}
           onChange={(event) => {
             const nextCity = event.target.value;
             setCity(nextCity);
+            setCityConfirmed(false);
             setSuggestions([]);
             updateLocation(nextCity, countryCode, false);
           }}
@@ -147,7 +167,7 @@ export default function LocationPicker({
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={suggestions.length > 0}
-          aria-controls={`${name}-suggestions`}
+          aria-controls={`${id}-suggestions`}
           aria-busy={loading}
           onKeyDown={(event) => {
             if (!suggestions.length) return;
@@ -169,7 +189,7 @@ export default function LocationPicker({
       <input type="hidden" name={name} value={formattedLocation} />
       {loading && <span className="form-hint" role="status">Finding cities…</span>}
       {suggestions.length > 0 && (
-        <ul className="location-suggestions" id={`${name}-suggestions`} role="listbox">
+        <ul className="location-suggestions" id={`${id}-suggestions`} role="listbox">
           {suggestions.map((suggestion, index) => (
             <li key={`${suggestion.latitude}-${suggestion.longitude}`} role="option" aria-selected={index === activeSuggestion}>
               <button

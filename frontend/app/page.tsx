@@ -554,9 +554,9 @@ export default function Home() {
 
   async function searchWeather(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const location = weatherLocation.trim() || selectedJourney?.origin;
+    const location = weatherLocation.trim();
     if (!location) {
-      setWeatherError("Enter a city or select a journey to check its origin.");
+      setWeatherError("Choose a country and city to check the forecast.");
       return;
     }
     setWeatherLoading(true);
@@ -804,6 +804,7 @@ export default function Home() {
           <LocationPicker
             name="weather_location"
             label="City or location"
+            required
             placeholder={selectedJourney?.origin || "e.g. Mangaluru"}
             onLocationChange={(location, countryCode) => {
               setWeatherLocation(location);
