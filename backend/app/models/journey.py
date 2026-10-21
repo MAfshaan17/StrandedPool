@@ -20,6 +20,7 @@ class Journey(Base):
     departure_at = Column(DateTime(timezone=True), nullable=False, index=True)
     arrive_by = Column(DateTime(timezone=True), nullable=True)
     budget_amount = Column(Float, nullable=True)
+    budget_currency = Column(String(3), nullable=False, default="INR", server_default="INR")
     constraints = Column(JSON, nullable=False, default=list)
     pooling_consent = Column(Boolean, nullable=False, default=False, server_default="0")
     passenger_count = Column(Integer, nullable=False, default=1, server_default="1")

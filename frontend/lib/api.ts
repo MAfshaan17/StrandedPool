@@ -10,6 +10,7 @@ export interface Journey {
   departure_at: string;
   arrive_by: string | null;
   budget_amount: number | null;
+  budget_currency: string;
   constraints: string[];
   pooling_consent: boolean;
   passenger_count: number;
@@ -48,6 +49,7 @@ export interface Alternative {
   departure_at: string | null;
   arrival_at: string | null;
   fare_amount: number | null;
+  currency: string;
   constraints_satisfied: string[];
   source_label: string;
   entered_at: string;
@@ -55,6 +57,7 @@ export interface Alternative {
   score: number;
   destination_match: boolean;
   within_budget: boolean | null;
+  currency_compatible: boolean;
   arrives_on_time: boolean | null;
   feasible: boolean;
   rejected_reasons: string[];
@@ -117,6 +120,59 @@ export interface CascadeAnalysis {
   limitations: string[];
 }
 
+export interface ActionDraft {
+  action: string;
+  language: string;
+  provider_name: string;
+  content: string;
+  source: string;
+  requires_user_review: true;
+  sent: false;
+}
+
+export interface RecoveryItinerary {
+  plan_id: number;
+  created_at: string;
+  source_label: string;
+  verification_status: string;
+  journey: Pick<Journey, "id" | "origin" | "destination" | "departure_at" | "arrive_by">;
+  original_bookings: Array<Pick<
+    JourneyBooking,
+    | "id"
+    | "kind"
+    | "provider"
+    | "origin"
+    | "destination"
+    | "scheduled_start"
+    | "scheduled_end"
+    | "status"
+    | "verification_status"
+  >>;
+  disruption_analysis: CascadeAnalysis | null;
+  proposed_alternative: (Alternative & {
+    status: string;
+    confirmation: string;
+  }) | null;
+  cost_comparison: {
+    status: string;
+    reason?: string;
+    currency?: string;
+    original_amount?: number;
+    proposed_amount?: number;
+    difference?: number;
+    source_label?: string;
+  };
+  required_next_steps: string[];
+  booking_changes_made: false;
+}
+
+export interface SavedRecoveryPlanSummary {
+  plan_id: number;
+  created_at: string;
+  source_label: string;
+  verification_status: string;
+}
+
 export interface RecoveryPlan {
   journey: Journey;
   disruptions: Disruption[];
@@ -151,6 +207,15 @@ export interface WeatherHour {
   wind_speed_kmh: number;
   weather_code: number;
   condition: string;
+}
+
+export interface LocationSuggestion {
+  name: string;
+  admin1: string | null;
+  country: string | null;
+  country_code: string;
+  latitude: number;
+  longitude: number;
 }
 
 export interface WeatherForecast {

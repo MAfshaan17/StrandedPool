@@ -22,6 +22,8 @@ if database_url.get_backend_name() == "sqlite":
             database_path = Path(__file__).resolve().parents[1] / database_path
         database_path.parent.mkdir(parents=True, exist_ok=True)
         database_url = database_url.set(database=str(database_path))
+elif database_url.get_backend_name() in {"postgres", "postgresql"}:
+    database_url = database_url.set(drivername="postgresql+psycopg")
 config.set_main_option(
     "sqlalchemy.url",
     database_url.render_as_string(hide_password=False).replace("%", "%%"),

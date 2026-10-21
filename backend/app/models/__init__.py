@@ -8,3 +8,4 @@ from .disruption import Disruption
 from .alternative import Alternative
 from .journey_booking import JourneyBooking
 from .booking_dependency import BookingDependency
+from .recovery_plan import RecoveryPlanRecord

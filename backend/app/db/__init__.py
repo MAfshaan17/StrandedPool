@@ -15,6 +15,9 @@ if database_url.get_backend_name() == "sqlite":
             database_path = BACKEND_DIR / database_path
         database_path.parent.mkdir(parents=True, exist_ok=True)
         database_url = database_url.set(database=str(database_path))
+elif database_url.get_backend_name() in {"postgres", "postgresql"}:
+    if database_url.drivername != "postgresql+asyncpg":
+        database_url = database_url.set(drivername="postgresql+asyncpg")
 
 engine = create_async_engine(database_url, echo=False)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)

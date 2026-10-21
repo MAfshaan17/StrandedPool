@@ -12,6 +12,7 @@ GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 CACHE_TTL_SECONDS = 15 * 60
 MAX_CACHE_ITEMS = 128
+MAX_PROVIDER_ATTEMPTS = 2
 
 _forecast_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _cache_lock = asyncio.Lock()
@@ -28,8 +29,10 @@ class WeatherLocationNotFound(Exception):
 async def get_weather_forecast(
     location: str,
     client: httpx.AsyncClient | None = None,
+    country_code: str | None = None,
 ) -> dict[str, Any]:
-    cache_key = location.strip().casefold()
+    normalized_country = country_code.upper() if country_code else ""
+    cache_key = f"{location.strip().casefold()}:{normalized_country}"
     now = time.monotonic()
 
     async with _cache_lock:
@@ -45,9 +48,11 @@ async def get_weather_forecast(
                 timeout=httpx.Timeout(8.0, connect=3.0),
                 follow_redirects=False,
             ) as provider_client:
-                result = await _fetch_forecast(location, provider_client)
+                result = await _fetch_forecast(
+                    location, provider_client, normalized_country or None
+                )
         else:
-            result = await _fetch_forecast(location, client)
+            result = await _fetch_forecast(location, client, normalized_country or None)
     except WeatherLocationNotFound:
         raise
     except WeatherProviderError:
@@ -81,15 +86,67 @@ async def clear_weather_cache() -> None:
         _forecast_cache.clear()
 
 
+async def search_weather_locations(
+    query: str,
+    country_code: str,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict[str, Any]]:
+    params = {
+        "name": query.strip(),
+        "count": 8,
+        "language": "en",
+        "format": "json",
+        "countryCode": country_code.upper(),
+    }
+    if client is None:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(8.0, connect=3.0),
+            follow_redirects=False,
+        ) as provider_client:
+            result = await _get_json(provider_client, GEOCODING_URL, params)
+    else:
+        result = await _get_json(client, GEOCODING_URL, params)
+
+    matches = result.get("results")
+    if matches is None:
+        return []
+    if not isinstance(matches, list):
+        raise WeatherProviderError("Open-Meteo returned invalid location results.")
+
+    suggestions = []
+    for match in matches:
+        if not isinstance(match, dict):
+            continue
+        try:
+            suggestions.append(
+                {
+                    "name": str(match["name"]),
+                    "admin1": match.get("admin1"),
+                    "country": match.get("country"),
+                    "country_code": str(match["country_code"]).upper(),
+                    "latitude": float(match["latitude"]),
+                    "longitude": float(match["longitude"]),
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return suggestions
+
+
 async def _fetch_forecast(
     location: str,
     client: httpx.AsyncClient,
+    country_code: str | None = None,
 ) -> dict[str, Any]:
-    geocoding = await _get_json(
-        client,
-        GEOCODING_URL,
-        {"name": location, "count": 1, "language": "en", "format": "json"},
-    )
+    geocoding_params = {
+        "name": location,
+        "count": 1,
+        "language": "en",
+        "format": "json",
+    }
+    if country_code:
+        geocoding_params["countryCode"] = country_code
+    geocoding = await _get_json(client, GEOCODING_URL, geocoding_params)
     locations = geocoding.get("results")
     if not isinstance(locations, list) or not locations:
         raise WeatherLocationNotFound("No weather location matched that search.")
@@ -150,25 +207,43 @@ async def _get_json(
     url: str,
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    try:
-        response = await client.get(url, params=params)
-        response.raise_for_status()
-        payload = response.json()
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 429:
-            logger.warning("Open-Meteo rate limit reached")
+    for attempt in range(MAX_PROVIDER_ATTEMPTS):
+        try:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if status_code == 429:
+                logger.warning("Open-Meteo rate limit reached")
+                raise WeatherProviderError(
+                    "Weather provider rate limit reached; please try again later."
+                ) from exc
+            if status_code >= 500 and attempt + 1 < MAX_PROVIDER_ATTEMPTS:
+                await asyncio.sleep(0.1 * (2**attempt))
+                continue
+            logger.warning("Open-Meteo request failed with status %s", status_code)
+            raise WeatherProviderError("Weather provider returned an error.") from exc
+        except httpx.RequestError as exc:
+            if attempt + 1 < MAX_PROVIDER_ATTEMPTS:
+                await asyncio.sleep(0.1 * (2**attempt))
+                continue
+            logger.warning("Open-Meteo request failed: %s", exc)
             raise WeatherProviderError(
-                "Weather provider rate limit reached; please try again later."
+                "Weather provider is temporarily unavailable."
             ) from exc
-        logger.warning("Open-Meteo request failed with status %s", exc.response.status_code)
-        raise WeatherProviderError("Weather provider returned an error.") from exc
-    except (httpx.RequestError, ValueError) as exc:
-        logger.warning("Open-Meteo request or response parsing failed: %s", exc)
-        raise WeatherProviderError("Weather provider is temporarily unavailable.") from exc
 
-    if not isinstance(payload, dict):
-        raise WeatherProviderError("Weather provider returned an invalid response.")
-    return payload
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            logger.warning("Open-Meteo returned malformed JSON")
+            raise WeatherProviderError(
+                "Weather provider returned an invalid response."
+            ) from exc
+        if not isinstance(payload, dict):
+            raise WeatherProviderError("Weather provider returned an invalid response.")
+        return payload
+
+    raise WeatherProviderError("Weather provider is temporarily unavailable.")
 
 
 def _extract_next_hours(hourly: dict[str, Any], count: int) -> list[dict[str, Any]]:

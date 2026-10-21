@@ -12,6 +12,8 @@ from app.services.weather import (
     WeatherProviderError,
     clear_weather_cache,
     get_weather_forecast,
+    search_weather_locations,
+    _get_json,
 )
 
 
@@ -106,8 +108,52 @@ def test_weather_location_not_found_is_explicit():
     asyncio.run(exercise())
 
 
+def test_weather_city_search_is_filtered_by_selected_country():
+    async def exercise() -> None:
+        captured_params = {}
+
+        def handle_request(request: httpx.Request) -> httpx.Response:
+            captured_params.update(request.url.params)
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "name": "Mangalore",
+                            "admin1": "Karnataka",
+                            "country": "India",
+                            "country_code": "IN",
+                            "latitude": 12.87,
+                            "longitude": 74.88,
+                        }
+                    ]
+                },
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handle_request)
+        ) as client:
+            matches = await search_weather_locations("Mangalore", "in", client)
+
+        assert captured_params["countryCode"] == "IN"
+        assert captured_params["count"] == "8"
+        assert matches == [
+            {
+                "name": "Mangalore",
+                "admin1": "Karnataka",
+                "country": "India",
+                "country_code": "IN",
+                "latitude": 12.87,
+                "longitude": 74.88,
+            }
+        ]
+
+    asyncio.run(exercise())
+
+
 def test_weather_endpoint_returns_provider_limitations(monkeypatch):
-    async def unavailable(location: str) -> dict:
+    async def unavailable(location: str, country_code: str | None = None) -> dict:
+        assert country_code == "IN"
         raise WeatherProviderError("Weather provider is temporarily unavailable.")
 
     monkeypatch.setattr(weather_routes, "get_weather_forecast", unavailable)
@@ -119,12 +165,116 @@ def test_weather_endpoint_returns_provider_limitations(monkeypatch):
         ) as client:
             response = await client.get(
                 "/api/v1/weather/forecast",
-                params={"location": "Mangaluru"},
+                params={"location": "Mangaluru", "country_code": "IN"},
             )
 
         assert response.status_code == 200
         assert response.json()["status"] == "unavailable"
         assert response.json()["hours"] == []
         assert "temporarily unavailable" in response.json()["notice"]
+
+    asyncio.run(exercise())
+
+
+def test_weather_location_endpoint_validates_country_code(monkeypatch):
+    async def search(query: str, country_code: str) -> list[dict]:
+        assert query == "Mang"
+        assert country_code == "IN"
+        return [{"name": "Mangaluru", "country": "India"}]
+
+    monkeypatch.setattr(weather_routes, "search_weather_locations", search)
+
+    async def exercise() -> None:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            response = await client.get(
+                "/api/v1/weather/locations",
+                params={"query": "Mang", "country_code": "IN"},
+            )
+            invalid = await client.get(
+                "/api/v1/weather/locations",
+                params={"query": "M", "country_code": "India"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["results"][0]["name"] == "Mangaluru"
+        assert invalid.status_code == 422
+
+    asyncio.run(exercise())
+
+
+def test_weather_provider_errors_and_bounded_retries():
+    async def exercise() -> None:
+        async def request_with(handler):
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(handler)
+            ) as client:
+                return await _get_json(client, "https://weather.example/test", {})
+
+        rate_limit_calls = 0
+
+        def rate_limited(request: httpx.Request) -> httpx.Response:
+            nonlocal rate_limit_calls
+            rate_limit_calls += 1
+            return httpx.Response(429, json={"message": "too many requests"})
+
+        try:
+            await request_with(rate_limited)
+        except WeatherProviderError as exc:
+            assert "rate limit" in str(exc)
+        else:
+            raise AssertionError("Expected provider rate-limit handling")
+        assert rate_limit_calls == 1
+
+        auth_calls = 0
+
+        def unauthorized(request: httpx.Request) -> httpx.Response:
+            nonlocal auth_calls
+            auth_calls += 1
+            return httpx.Response(401, json={"message": "unauthorized"})
+
+        try:
+            await request_with(unauthorized)
+        except WeatherProviderError as exc:
+            assert str(exc) == "Weather provider returned an error."
+        else:
+            raise AssertionError("Expected provider authentication failure handling")
+        assert auth_calls == 1
+
+        def malformed(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"{")
+
+        try:
+            await request_with(malformed)
+        except WeatherProviderError as exc:
+            assert "invalid response" in str(exc)
+        else:
+            raise AssertionError("Expected malformed provider response handling")
+
+        transient_calls = 0
+
+        def transient(request: httpx.Request) -> httpx.Response:
+            nonlocal transient_calls
+            transient_calls += 1
+            if transient_calls == 1:
+                return httpx.Response(503)
+            return httpx.Response(200, json={"status": "recovered"})
+
+        assert await request_with(transient) == {"status": "recovered"}
+        assert transient_calls == 2
+
+        timeout_calls = 0
+
+        def timeout_then_success(request: httpx.Request) -> httpx.Response:
+            nonlocal timeout_calls
+            timeout_calls += 1
+            if timeout_calls == 1:
+                raise httpx.ConnectTimeout("simulated timeout", request=request)
+            return httpx.Response(200, json={"status": "recovered"})
+
+        assert await request_with(timeout_then_success) == {"status": "recovered"}
+        assert timeout_calls == 2
 
     asyncio.run(exercise())

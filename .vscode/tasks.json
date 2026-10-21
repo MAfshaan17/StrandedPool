@@ -117,6 +117,19 @@
 			],
 			"isBackground": false,
 			"problemMatcher": []
+		},
+		{
+			"label": "Start updated StrandedPool UI preview",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d D:\\StrandedPool\\frontend && npm run start -- --hostname 127.0.0.1 --port 3006"
+			],
+			"isBackground": true,
+			"problemMatcher": [
+				"$tsc-watch"
+			]
 		}
 	]
 }

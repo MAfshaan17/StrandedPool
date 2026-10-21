@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends, Query, status
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,12 +13,66 @@ from ...models.booking_dependency import BookingDependency
 from ...models.disruption import Disruption
 from ...models.journey import Journey
 from ...models.journey_booking import JourneyBooking
+from ...models.recovery_plan import RecoveryPlanRecord
 from ...models.user import User
-from ...schemas import AlternativeCreate, AlternativeScore
+from ...schemas import (
+    AlternativeCreate,
+    AlternativeScore,
+    JourneyBookingRead,
+    JourneyRead,
+    RecoveryGenerateRequest,
+)
+from ...services.cascade import analyze_booking_cascade
 from ...services.recovery import are_pooling_compatible, score_alternative
 from .journeys import get_journey_or_404
 
 router = APIRouter()
+
+
+def _utc_timestamp(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _compare_user_entered_costs(
+    booking_list: list[JourneyBooking],
+    alternative: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if alternative is None or alternative["fare_amount"] is None:
+        return {
+            "status": "unavailable",
+            "reason": "A selected alternative with a fare is required for comparison.",
+        }
+    original_booking = next(
+        (
+            booking
+            for booking in booking_list
+            if booking.kind == "transport" and booking.price_amount is not None
+        ),
+        None,
+    )
+    if original_booking is None:
+        return {
+            "status": "unavailable",
+            "reason": "No original transport fare was recorded for comparison.",
+        }
+    if original_booking.currency.casefold() != alternative["currency"].casefold():
+        return {
+            "status": "unavailable",
+            "reason": "Original and proposed fares use different currencies.",
+        }
+    return {
+        "status": "user_entered_comparison",
+        "currency": original_booking.currency,
+        "original_amount": original_booking.price_amount,
+        "proposed_amount": alternative["fare_amount"],
+        "difference": round(
+            alternative["fare_amount"] - original_booking.price_amount,
+            2,
+        ),
+        "source_label": "Traveller-entered values; not independently verified",
+    }
 
 
 @router.get("/transport/search", tags=["Recovery"])
@@ -32,6 +90,29 @@ async def search_transport(
         "checked_at": None,
         "options": [],
         "message": "No live transport results are available. Add options you have checked directly with a provider.",
+    }
+
+
+@router.get("/v1/providers/status", tags=["Providers"])
+async def get_provider_status():
+    return {
+        "providers": {
+            "open_meteo": {
+                "status": "configured_not_checked",
+                "connection_verified": False,
+                "details": "Connectivity is checked only when a forecast is requested.",
+            },
+            "transport_inventory": {
+                "status": "unavailable",
+                "connection_verified": False,
+                "details": "No authorized transport inventory provider is configured.",
+            },
+            "gemini": {
+                "status": "not_configured",
+                "connection_verified": False,
+                "details": "AI provider integration is not implemented.",
+            },
+        }
     }
 
 
@@ -156,6 +237,155 @@ async def get_recovery_plan(
             "availability": "not verified",
         },
         "next_steps": steps,
+    }
+
+
+@router.post("/v1/recovery/generate", tags=["Recovery"])
+async def generate_recovery_itinerary(
+    payload: RecoveryGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    journey = await get_journey_or_404(payload.journey_id, db, user.id)
+    bookings = await db.scalars(
+        select(JourneyBooking)
+        .where(JourneyBooking.journey_id == journey.id)
+        .order_by(JourneyBooking.created_at, JourneyBooking.id)
+    )
+    booking_list = list(bookings.all())
+    impact_analysis = None
+    if payload.affected_booking_id is not None:
+        edges = await db.execute(
+            select(
+                BookingDependency.predecessor_booking_id,
+                BookingDependency.downstream_booking_id,
+            ).where(BookingDependency.journey_id == journey.id)
+        )
+        try:
+            impact_analysis = analyze_booking_cascade(
+                bookings=booking_list,
+                dependency_edges=list(edges.all()),
+                affected_booking_id=payload.affected_booking_id,
+                disruption_status=payload.disruption_status,
+                delay_minutes=payload.delay_minutes,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    proposed_alternative = None
+    if payload.selected_alternative_id is not None:
+        alternative = await db.scalar(
+            select(Alternative).where(
+                Alternative.id == payload.selected_alternative_id,
+                Alternative.journey_id == journey.id,
+            )
+        )
+        if alternative is None:
+            raise HTTPException(status_code=404, detail="Alternative not found.")
+        scored = score_alternative(alternative, journey)
+        if not scored["feasible"]:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "The selected alternative does not meet the journey constraints.",
+                    "rejected_reasons": scored["rejected_reasons"],
+                },
+            )
+        proposed_alternative = {
+            **scored,
+            "status": "proposed_not_booked",
+            "confirmation": "Confirm availability and details directly with the provider.",
+        }
+
+    required_next_steps = [
+        "Confirm current disruption details with the responsible operator.",
+        "Check any proposed transport option directly with its provider before making changes.",
+        "Contact downstream accommodation, pickup, or appointment providers if arrival is affected.",
+    ]
+    if impact_analysis:
+        required_next_steps.insert(
+            0,
+            "Review the simulated downstream impacts; no bookings were changed or cancelled.",
+        )
+
+    itinerary = {
+        "source_label": "Generated from traveller-provided journey and booking details",
+        "verification_status": "UNVERIFIED",
+        "journey": jsonable_encoder(JourneyRead.model_validate(journey)),
+        "original_bookings": [
+            jsonable_encoder(JourneyBookingRead.model_validate(booking))
+            for booking in booking_list
+        ],
+        "disruption_analysis": impact_analysis,
+        "proposed_alternative": proposed_alternative,
+        "cost_comparison": _compare_user_entered_costs(
+            booking_list,
+            proposed_alternative,
+        ),
+        "required_next_steps": required_next_steps,
+        "booking_changes_made": False,
+    }
+    record = RecoveryPlanRecord(
+        journey_id=journey.id,
+        source_label=itinerary["source_label"],
+        payload=jsonable_encoder(itinerary),
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return {
+        **itinerary,
+        "plan_id": record.id,
+        "created_at": _utc_timestamp(record.created_at),
+    }
+
+
+@router.get(
+    "/v1/journeys/{journey_id}/recovery-plans",
+    tags=["Recovery"],
+)
+async def list_saved_recovery_plans(
+    journey_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    await get_journey_or_404(journey_id, db, user.id)
+    records = await db.scalars(
+        select(RecoveryPlanRecord)
+        .where(RecoveryPlanRecord.journey_id == journey_id)
+        .order_by(RecoveryPlanRecord.created_at.desc(), RecoveryPlanRecord.id.desc())
+    )
+    return [
+        {
+            "plan_id": record.id,
+            "created_at": _utc_timestamp(record.created_at),
+            "source_label": record.source_label,
+            "verification_status": record.payload["verification_status"],
+        }
+        for record in records.all()
+    ]
+
+
+@router.get("/v1/recovery/plans/{plan_id}", tags=["Recovery"])
+async def get_saved_recovery_plan(
+    plan_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    record = await db.scalar(
+        select(RecoveryPlanRecord)
+        .join(Journey, Journey.id == RecoveryPlanRecord.journey_id)
+        .where(
+            RecoveryPlanRecord.id == plan_id,
+            Journey.owner_user_id == user.id,
+        )
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Recovery plan not found.")
+    return {
+        **record.payload,
+        "plan_id": record.id,
+        "created_at": _utc_timestamp(record.created_at),
     }
 
 

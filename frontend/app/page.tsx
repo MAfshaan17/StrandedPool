@@ -5,15 +5,19 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import {
   apiRequest,
   Alternative,
+  ActionDraft,
   AuthResponse,
   BookingDependency,
   CascadeAnalysis,
   Dashboard,
   JourneyBooking,
+  RecoveryItinerary,
   RecoveryPlan,
+  SavedRecoveryPlanSummary,
   TransportSearchResult,
   WeatherForecast,
 } from "../lib/api";
+import LocationPicker from "../components/LocationPicker";
 
 function toIsoDate(value: string): string {
   const date = new Date(value);
@@ -55,6 +59,7 @@ export default function Home() {
   const [searchMessage, setSearchMessage] = useState("");
   const [searching, setSearching] = useState(false);
   const [weatherLocation, setWeatherLocation] = useState("");
+  const [weatherCountryCode, setWeatherCountryCode] = useState("");
   const [weatherForecast, setWeatherForecast] = useState<WeatherForecast | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState("");
@@ -62,6 +67,16 @@ export default function Home() {
   const [cascadeError, setCascadeError] = useState("");
   const [analyzingCascade, setAnalyzingCascade] = useState(false);
   const [dependencyError, setDependencyError] = useState("");
+  const [actionDraft, setActionDraft] = useState<ActionDraft | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [draftingAction, setDraftingAction] = useState(false);
+  const [selectedAlternativeId, setSelectedAlternativeId] = useState<number | null>(null);
+  const [recoveryItinerary, setRecoveryItinerary] = useState<RecoveryItinerary | null>(null);
+  const [itineraryError, setItineraryError] = useState("");
+  const [generatingItinerary, setGeneratingItinerary] = useState(false);
+  const [savedRecoveryPlans, setSavedRecoveryPlans] = useState<SavedRecoveryPlanSummary[]>([]);
+  const [selectedSavedPlanId, setSelectedSavedPlanId] = useState("");
+  const [savedPlanError, setSavedPlanError] = useState("");
 
   useEffect(() => {
     setAccessToken(window.sessionStorage.getItem("strandedpool_access_token"));
@@ -129,13 +144,28 @@ export default function Home() {
     setAccessToken(null);
     setDashboard(null);
     setRecovery(null);
+    setSelectedJourneyId("");
+    setRecoveryItinerary(null);
+    setSavedRecoveryPlans([]);
+    setSelectedSavedPlanId("");
+    setActionDraft(null);
   }
 
   useEffect(() => {
     if (!selectedJourneyId) {
       setRecovery(null);
+      setCascadeAnalysis(null);
+      setRecoveryItinerary(null);
+      setSavedRecoveryPlans([]);
+      setSelectedSavedPlanId("");
       return;
     }
+    setCascadeAnalysis(null);
+    setRecoveryItinerary(null);
+    setSelectedAlternativeId(null);
+    setSavedRecoveryPlans([]);
+    setSelectedSavedPlanId("");
+    setActionDraft(null);
     let active = true;
     apiRequest<RecoveryPlan>(`/api/journeys/${selectedJourneyId}/recovery`)
       .then((plan) => {
@@ -154,6 +184,36 @@ export default function Home() {
       active = false;
     };
   }, [selectedJourneyId, dashboard?.journeys.length]);
+
+  useEffect(() => {
+    if (!selectedJourneyId) return;
+    let active = true;
+    setSavedPlanError("");
+    apiRequest<SavedRecoveryPlanSummary[]>(
+      `/api/v1/journeys/${selectedJourneyId}/recovery-plans`,
+    )
+      .then((plans) => {
+        if (!active) return;
+        setSavedRecoveryPlans(plans);
+        setSelectedSavedPlanId((current) =>
+          plans.some((plan) => String(plan.plan_id) === current)
+            ? current
+            : plans[0]
+              ? String(plans[0].plan_id)
+              : "",
+        );
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setSavedPlanError(
+            error instanceof Error ? error.message : "Unable to load saved recovery plans.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedJourneyId]);
 
   async function submitJourney(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -176,6 +236,7 @@ export default function Home() {
           budget_amount: form.get("budget_amount")
             ? Number(form.get("budget_amount"))
             : null,
+          budget_currency: form.get("budget_currency"),
           pooling_consent: form.get("pooling_consent") === "on",
           passenger_count: Number(form.get("passenger_count") || 1),
           constraints: String(form.get("constraints") ?? "")
@@ -249,6 +310,7 @@ export default function Home() {
             fare_amount: form.get("fare_amount")
               ? Number(form.get("fare_amount"))
               : null,
+            currency: form.get("currency"),
             constraints_satisfied: String(form.get("constraints_satisfied") ?? "")
               .split(",")
               .map((value) => value.trim())
@@ -378,6 +440,95 @@ export default function Home() {
     }
   }
 
+  async function submitActionDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedJourney) return;
+    const form = new FormData(event.currentTarget);
+    setDraftingAction(true);
+    setActionError("");
+    try {
+      setActionDraft(
+        await apiRequest<ActionDraft>("/api/v1/actions/draft", {
+          method: "POST",
+          body: JSON.stringify({
+            action: form.get("action"),
+            language: form.get("language"),
+            provider_name: form.get("provider_name"),
+            origin: selectedJourney.origin,
+            destination: selectedJourney.destination,
+          }),
+        }),
+      );
+    } catch (error) {
+      setActionDraft(null);
+      setActionError(
+        error instanceof Error ? error.message : "Unable to draft this message.",
+      );
+    } finally {
+      setDraftingAction(false);
+    }
+  }
+
+  async function generateRecoveryItinerary() {
+    if (!selectedJourneyId) return;
+    setGeneratingItinerary(true);
+    setItineraryError("");
+    try {
+      const itinerary = await apiRequest<RecoveryItinerary>("/api/v1/recovery/generate", {
+          method: "POST",
+          body: JSON.stringify({
+            journey_id: Number(selectedJourneyId),
+            selected_alternative_id: selectedAlternativeId,
+            ...(cascadeAnalysis
+              ? {
+                  affected_booking_id: cascadeAnalysis.affected_booking_id,
+                  disruption_status: cascadeAnalysis.disruption_status,
+                  delay_minutes: cascadeAnalysis.delay_minutes,
+                }
+              : {}),
+          }),
+        });
+      setRecoveryItinerary(itinerary);
+      const summary = {
+        plan_id: itinerary.plan_id,
+        created_at: itinerary.created_at,
+        source_label: itinerary.source_label,
+        verification_status: itinerary.verification_status,
+      };
+      setSavedRecoveryPlans((plans) => [
+        summary,
+        ...plans.filter((plan) => plan.plan_id !== summary.plan_id),
+      ]);
+      setSelectedSavedPlanId(String(itinerary.plan_id));
+    } catch (error) {
+      setRecoveryItinerary(null);
+      setItineraryError(
+        error instanceof Error ? error.message : "Unable to generate the recovery itinerary.",
+      );
+    } finally {
+      setGeneratingItinerary(false);
+    }
+  }
+
+  async function retrieveRecoveryItinerary() {
+    if (!selectedSavedPlanId) return;
+    setGeneratingItinerary(true);
+    setItineraryError("");
+    try {
+      setRecoveryItinerary(
+        await apiRequest<RecoveryItinerary>(
+          `/api/v1/recovery/plans/${Number(selectedSavedPlanId)}`,
+        ),
+      );
+    } catch (error) {
+      setItineraryError(
+        error instanceof Error ? error.message : "Unable to retrieve the saved itinerary.",
+      );
+    } finally {
+      setGeneratingItinerary(false);
+    }
+  }
+
   async function searchTransport() {
     if (!selectedJourney) return;
     setSearching(true);
@@ -412,6 +563,7 @@ export default function Home() {
     setWeatherError("");
     try {
       const params = new URLSearchParams({ location });
+      if (weatherCountryCode) params.set("country_code", weatherCountryCode);
       setWeatherForecast(
         await apiRequest<WeatherForecast>(
           `/api/v1/weather/forecast?${params.toString()}`,
@@ -649,17 +801,15 @@ export default function Home() {
           <span className="panel-icon">WX</span>
         </div>
         <form className="weather-search" onSubmit={searchWeather}>
-          <label className="form-field">
-            <span>City or location</span>
-            <input
-              className="input"
-              value={weatherLocation}
-              onChange={(event) => setWeatherLocation(event.target.value)}
-              maxLength={120}
-              minLength={2}
-              placeholder={selectedJourney?.origin || "e.g. Mangaluru"}
-            />
-          </label>
+          <LocationPicker
+            name="weather_location"
+            label="City or location"
+            placeholder={selectedJourney?.origin || "e.g. Mangaluru"}
+            onLocationChange={(location, countryCode) => {
+              setWeatherLocation(location);
+              setWeatherCountryCode(countryCode);
+            }}
+          />
           <button className="button button-primary" type="submit" disabled={weatherLoading}>
             {weatherLoading ? "Checking…" : "Check forecast"}
           </button>
@@ -708,14 +858,8 @@ export default function Home() {
               <span>Display name</span>
               <input className="input" name="traveller_name" maxLength={80} required placeholder="e.g. Alex" />
             </label>
-            <label className="form-field">
-              <span>From</span>
-              <input className="input" name="origin" maxLength={120} required placeholder="Departure city" />
-            </label>
-            <label className="form-field">
-              <span>To</span>
-              <input className="input" name="destination" maxLength={120} required placeholder="Destination city" />
-            </label>
+            <LocationPicker name="origin" label="From" required placeholder="Departure city" />
+            <LocationPicker name="destination" label="To" required placeholder="Destination city" />
             <label className="form-field">
               <span>Departure</span>
               <input className="input" name="departure_at" type="datetime-local" required />
@@ -727,6 +871,15 @@ export default function Home() {
             <label className="form-field">
               <span>Budget <em>Optional</em></span>
               <input className="input" name="budget_amount" type="number" min="0" step="0.01" placeholder="Amount" />
+            </label>
+            <label className="form-field">
+              <span>Budget currency</span>
+              <select className="input" name="budget_currency" defaultValue="INR">
+                <option value="INR">INR</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+              </select>
             </label>
             <label className="form-field form-field-wide">
               <span>Constraints <em>Optional, comma-separated</em></span>
@@ -807,14 +960,8 @@ export default function Home() {
               <span>Notes <em>Optional</em></span>
               <textarea className="input textarea" name="details" maxLength={2000} placeholder="Non-sensitive details about this booking." />
             </label>
-            <label className="form-field">
-              <span>Origin <em>Optional</em></span>
-              <input className="input" name="origin" maxLength={120} />
-            </label>
-            <label className="form-field">
-              <span>Destination <em>Optional</em></span>
-              <input className="input" name="destination" maxLength={120} />
-            </label>
+            <LocationPicker name="origin" label="Origin (optional)" placeholder="Choose if known" />
+            <LocationPicker name="destination" label="Destination (optional)" placeholder="Choose if known" />
             <label className="form-field">
               <span>Scheduled start <em>Optional</em></span>
               <input className="input" name="scheduled_start" type="datetime-local" />
@@ -831,7 +978,7 @@ export default function Home() {
               <span>Price <em>Optional</em></span>
               <input className="input" name="price_amount" type="number" min="0" step="0.01" />
             </label>
-            <p className="form-hint form-field-wide">This local MVP has no sign-in or encryption. Do not enter booking references or sensitive personal information.</p>
+            <p className="form-hint form-field-wide">Booking details are private to your account but are not encrypted at rest. Avoid storing booking references or sensitive personal information.</p>
             {bookingError && <p className="form-error form-field-wide" role="alert">{bookingError}</p>}
             <button className="button button-secondary form-field-wide" disabled={saving || !selectedJourneyId}>
               {saving ? "Saving…" : "Add booking"}
@@ -871,14 +1018,8 @@ export default function Home() {
               <span>Provider / source</span>
               <input className="input" name="provider" required maxLength={120} placeholder="Where you checked" />
             </label>
-            <label className="form-field">
-              <span>From</span>
-              <input className="input" name="origin" required maxLength={120} defaultValue={selectedJourney?.origin ?? ""} />
-            </label>
-            <label className="form-field">
-              <span>To</span>
-              <input className="input" name="destination" required maxLength={120} defaultValue={selectedJourney?.destination ?? ""} />
-            </label>
+            <LocationPicker name="origin" label="From" required defaultValue={selectedJourney?.origin} />
+            <LocationPicker name="destination" label="To" required defaultValue={selectedJourney?.destination} />
             <label className="form-field">
               <span>Arrival time <em>Optional</em></span>
               <input className="input" name="arrival_at" type="datetime-local" />
@@ -886,6 +1027,15 @@ export default function Home() {
             <label className="form-field">
               <span>Fare <em>Optional</em></span>
               <input className="input" name="fare_amount" type="number" min="0" step="0.01" placeholder="Amount" />
+            </label>
+            <label className="form-field">
+              <span>Fare currency</span>
+              <select className="input" name="currency" defaultValue="INR">
+                <option value="INR">INR</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="GBP">GBP</option>
+              </select>
             </label>
             <label className="form-field form-field-wide">
               <span>Constraints this option appears to meet <em>Optional, comma-separated</em></span>
@@ -908,7 +1058,7 @@ export default function Home() {
                   </div>
                   <p>{alternative.origin} → {alternative.destination}</p>
                   <div className="option-facts">
-                    <span>Fare: {formatFare(alternative.fare_amount)}</span>
+                    <span>Fare: {formatFare(alternative.fare_amount)} {alternative.currency}</span>
                     <span>Arrives: {formatDate(alternative.arrival_at)}</span>
                   </div>
                   <div className="report-meta">
@@ -919,6 +1069,14 @@ export default function Home() {
                   <ul className="reason-list">
                     {alternative.reasons.map((reason) => <li key={reason}>{reason}</li>)}
                   </ul>
+                  <button
+                    className="text-button"
+                    type="button"
+                    aria-pressed={selectedAlternativeId === alternative.id}
+                    onClick={() => setSelectedAlternativeId(alternative.id)}
+                  >
+                    {selectedAlternativeId === alternative.id ? "Selected for itinerary" : "Use in recovery itinerary"}
+                  </button>
                 </article>
               ))
             ) : (
@@ -1035,6 +1193,116 @@ export default function Home() {
                   </li>
                 ))}
               </ol>
+              <div className="itinerary-controls">
+                {itineraryError && <p className="form-error" role="alert">{itineraryError}</p>}
+                {savedPlanError && <p className="form-error" role="alert">{savedPlanError}</p>}
+                {savedRecoveryPlans.length > 0 && (
+                  <div className="saved-plan-controls">
+                    <label className="form-field">
+                      <span>Saved recovery plans</span>
+                      <select
+                        className="input"
+                        value={selectedSavedPlanId}
+                        onChange={(event) => setSelectedSavedPlanId(event.target.value)}
+                      >
+                        {savedRecoveryPlans.map((plan) => (
+                          <option key={plan.plan_id} value={plan.plan_id}>
+                            Plan #{plan.plan_id} · {formatDate(plan.created_at)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="button button-secondary"
+                      type="button"
+                      onClick={() => void retrieveRecoveryItinerary()}
+                      disabled={generatingItinerary || !selectedSavedPlanId}
+                    >
+                      Retrieve selected plan
+                    </button>
+                  </div>
+                )}
+                <button
+                  className="button button-primary"
+                  type="button"
+                  onClick={() => void generateRecoveryItinerary()}
+                  disabled={generatingItinerary}
+                >
+                  {generatingItinerary ? "Building itinerary…" : "Build recovery itinerary"}
+                </button>
+                {recoveryItinerary && (
+                  <section className="itinerary-results" aria-live="polite">
+                    <strong>Recovery itinerary · {recoveryItinerary.verification_status}</strong>
+                    <p>
+                      Saved plan #{recoveryItinerary.plan_id} ·{" "}
+                      {formatDate(recoveryItinerary.created_at)}
+                    </p>
+                    <div className="itinerary-timelines">
+                      <div>
+                        <strong>Original timeline</strong>
+                        <p>{recoveryItinerary.journey.origin} → {recoveryItinerary.journey.destination}</p>
+                        <p>Departure: {formatDate(recoveryItinerary.journey.departure_at)}</p>
+                        {recoveryItinerary.original_bookings.length ? (
+                          <ul className="timeline-list">
+                            {recoveryItinerary.original_bookings.map((booking) => (
+                              <li key={booking.id}>
+                                <strong>{booking.provider} · {booking.kind}</strong>
+                                <span>
+                                  {booking.origin || "—"} → {booking.destination || "—"}
+                                  {" · "}{formatDate(booking.scheduled_start)}
+                                  {booking.verification_status !== "VERIFIED" && " · unverified"}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : <p className="empty-copy">No original bookings recorded.</p>}
+                      </div>
+                      <div>
+                        <strong>Proposed timeline</strong>
+                        {recoveryItinerary.proposed_alternative ? (
+                          <>
+                            <p>{recoveryItinerary.journey.origin} → {recoveryItinerary.journey.destination}</p>
+                            <p>
+                              {recoveryItinerary.proposed_alternative.mode} ·{" "}
+                              {recoveryItinerary.proposed_alternative.provider}
+                              {" · arrival "}{formatDate(recoveryItinerary.proposed_alternative.arrival_at)}
+                            </p>
+                            <p>
+                              Fare: {formatFare(recoveryItinerary.proposed_alternative.fare_amount)}{" "}
+                              {recoveryItinerary.proposed_alternative.currency}
+                              {" · user-entered, not provider-verified"}
+                            </p>
+                            <p className="form-hint">
+                              This proposal is not confirmed and has not replaced the original bookings.
+                            </p>
+                          </>
+                        ) : (
+                          <p className="empty-copy">No alternative selected; original bookings remain unchanged.</p>
+                        )}
+                      </div>
+                    </div>
+                    {recoveryItinerary.cost_comparison.status === "user_entered_comparison" ? (
+                      <p className="form-hint">
+                        Reported fare change: {formatFare(recoveryItinerary.cost_comparison.difference ?? null)}{" "}
+                        {recoveryItinerary.cost_comparison.currency} · {recoveryItinerary.cost_comparison.source_label}
+                      </p>
+                    ) : (
+                      <p className="form-hint">{recoveryItinerary.cost_comparison.reason}</p>
+                    )}
+                    {recoveryItinerary.booking_changes_made && (
+                      <p className="form-error">Unexpected booking state; contact support.</p>
+                    )}
+                    <ol className="steps-list">
+                      {recoveryItinerary.required_next_steps.map((step, index) => (
+                        <li key={step}>
+                          <span className="step-number">{String(index + 1).padStart(2, "0")}</span>
+                          <span>{step}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </section>
+                )}
+              </div>
             </>
           ) : (
             <p className="empty-copy">Choose a journey to see bookings and recovery steps.</p>
@@ -1073,6 +1341,59 @@ export default function Home() {
             </p>
           )}
         </div>
+      </section>
+
+      <section className="panel action-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">REVIEW BEFORE SENDING</p>
+            <h2>Draft a service-provider message</h2>
+            <p className="section-subtitle">
+              These are editable templates, not AI output. StrandedPool never sends them.
+            </p>
+          </div>
+        </div>
+        <form className="form-grid action-form" onSubmit={submitActionDraft}>
+          <label className="form-field">
+            <span>Message purpose</span>
+            <select className="input" name="action" defaultValue="hotel_late_checkin">
+              <option value="hotel_late_checkin">Hotel late check-in</option>
+              <option value="refund_inquiry">Refund inquiry</option>
+              <option value="cab_pickup_update">Cab pickup update</option>
+              <option value="appointment_reschedule">Appointment reschedule</option>
+              <option value="disruption_notification">Disruption notification</option>
+            </select>
+          </label>
+          <label className="form-field">
+            <span>Language</span>
+            <select className="input" name="language" defaultValue="en">
+              <option value="en">English</option>
+              <option value="hi">Hindi</option>
+              <option value="kn">Kannada</option>
+            </select>
+          </label>
+          <label className="form-field form-field-wide">
+            <span>Provider or recipient</span>
+            <input className="input" name="provider_name" maxLength={120} required placeholder="e.g. hotel or service desk" />
+          </label>
+          {actionError && <p className="form-error form-field-wide" role="alert">{actionError}</p>}
+          <button className="button button-secondary form-field-wide" disabled={draftingAction || !selectedJourneyId}>
+            {draftingAction ? "Drafting…" : "Generate editable draft"}
+          </button>
+        </form>
+        {actionDraft && (
+          <div className="action-draft">
+            <p className="form-hint">{actionDraft.source} · {actionDraft.language.toUpperCase()} · not sent</p>
+            <label className="form-field">
+              <span>Edit the draft before copying or sending it yourself</span>
+              <textarea
+                className="input textarea action-textarea"
+                value={actionDraft.content}
+                onChange={(event) => setActionDraft({ ...actionDraft, content: event.target.value })}
+              />
+            </label>
+          </div>
+        )}
       </section>
 
       <footer className="footer">

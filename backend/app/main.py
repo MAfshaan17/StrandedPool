@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api.routes import auth, health
+from .api.routes import actions, auth, health
 from .api.routes import bookings, disruptions, journeys, recovery, weather
 from .core.config import settings
 
@@ -35,6 +35,7 @@ app.include_router(recovery.router, prefix="/api")
 app.include_router(bookings.router, prefix="/api")
 app.include_router(weather.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
+app.include_router(actions.router, prefix="/api")
 
 
 @app.get("/health", tags=["Health"], include_in_schema=False)

@@ -143,6 +143,87 @@ def test_recovery_workflow_and_validation(tmp_path):
                 assert rejected_option.json()["feasible"] is False
                 assert len(rejected_option.json()["rejected_reasons"]) == 2
 
+                itinerary = await client.post(
+                    "/api/v1/recovery/generate",
+                    json={
+                        "journey_id": journey_id,
+                        "selected_alternative_id": alternative.json()["id"],
+                    },
+                )
+                assert itinerary.status_code == 200
+                assert itinerary.json()["proposed_alternative"]["status"] == "proposed_not_booked"
+                assert itinerary.json()["booking_changes_made"] is False
+                assert itinerary.json()["cost_comparison"]["status"] == "unavailable"
+                saved_plan_id = itinerary.json()["plan_id"]
+                saved_plans = await client.get(
+                    f"/api/v1/journeys/{journey_id}/recovery-plans"
+                )
+                assert saved_plans.status_code == 200
+                assert saved_plans.json()[0]["plan_id"] == saved_plan_id
+                retrieved_plan = await client.get(
+                    f"/api/v1/recovery/plans/{saved_plan_id}"
+                )
+                assert retrieved_plan.status_code == 200
+                assert retrieved_plan.json()["plan_id"] == saved_plan_id
+                assert retrieved_plan.json()["journey"]["id"] == journey_id
+
+                simulated_itinerary = await client.post(
+                    "/api/v1/recovery/generate",
+                    json={
+                        "journey_id": journey_id,
+                        "affected_booking_id": booking.json()["id"],
+                        "disruption_status": "cancelled",
+                        "selected_alternative_id": alternative.json()["id"],
+                    },
+                )
+                assert simulated_itinerary.status_code == 200
+                assert simulated_itinerary.json()["disruption_analysis"]["impacts"][0]["impact"] == "cancelled"
+                assert simulated_itinerary.json()["booking_changes_made"] is False
+
+                rejected_itinerary = await client.post(
+                    "/api/v1/recovery/generate",
+                    json={
+                        "journey_id": journey_id,
+                        "selected_alternative_id": rejected_option.json()["id"],
+                    },
+                )
+                assert rejected_itinerary.status_code == 422
+
+                currency_mismatch = await client.post(
+                    f"/api/journeys/{journey_id}/alternatives",
+                    json={
+                        "mode": "bus",
+                        "provider": "Foreign-currency option",
+                        "origin": "Mangaluru",
+                        "destination": "Udupi",
+                        "arrival_at": "2026-10-21T11:00:00Z",
+                        "fare_amount": 20,
+                        "currency": "USD",
+                    },
+                )
+                assert currency_mismatch.status_code == 201
+                assert currency_mismatch.json()["feasible"] is False
+                assert currency_mismatch.json()["within_budget"] is None
+                assert currency_mismatch.json()["currency_compatible"] is False
+                assert any(
+                    "currency does not match" in reason
+                    for reason in currency_mismatch.json()["rejected_reasons"]
+                )
+
+                action_draft = await client.post(
+                    "/api/v1/actions/draft",
+                    json={
+                        "action": "hotel_late_checkin",
+                        "language": "en",
+                        "provider_name": "Coastal Inn",
+                        "origin": "Mangaluru",
+                        "destination": "Udupi",
+                    },
+                )
+                assert action_draft.status_code == 200
+                assert action_draft.json()["requires_user_review"] is True
+                assert action_draft.json()["sent"] is False
+
                 recovery = await client.get(f"/api/journeys/{journey_id}/recovery")
                 assert recovery.status_code == 200
                 assert len(recovery.json()["bookings"]) == 1
@@ -158,6 +239,16 @@ def test_recovery_workflow_and_validation(tmp_path):
                 assert unavailable.status_code == 200
                 assert unavailable.json()["status"] == "provider_unavailable"
                 assert unavailable.json()["options"] == []
+                provider_status = await client.get("/api/v1/providers/status")
+                assert provider_status.status_code == 200
+                assert (
+                    provider_status.json()["providers"]["transport_inventory"]["status"]
+                    == "unavailable"
+                )
+                assert (
+                    provider_status.json()["providers"]["open_meteo"]["connection_verified"]
+                    is False
+                )
 
                 invalid = await client.post(
                     "/api/journeys",
@@ -251,13 +342,26 @@ def test_authentication_and_journey_ownership(tmp_path):
                 )
                 assert created.status_code == 201
                 journey_id = created.json()["id"]
+                saved_plan = await client.post(
+                    "/api/v1/recovery/generate",
+                    json={"journey_id": journey_id},
+                )
+                assert saved_plan.status_code == 200
 
                 client.headers["Authorization"] = (
                     f"Bearer {other_registration.json()['access_token']}"
                 )
                 private_journey = await client.get(f"/api/journeys/{journey_id}/recovery")
+                private_plan = await client.get(
+                    f"/api/v1/recovery/plans/{saved_plan.json()['plan_id']}"
+                )
+                private_plan_list = await client.get(
+                    f"/api/v1/journeys/{journey_id}/recovery-plans"
+                )
                 listed = await client.get("/api/journeys")
                 assert private_journey.status_code == 404
+                assert private_plan.status_code == 404
+                assert private_plan_list.status_code == 404
                 assert listed.status_code == 200
                 assert listed.json() == []
         finally:

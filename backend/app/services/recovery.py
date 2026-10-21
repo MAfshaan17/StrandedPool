@@ -8,9 +8,16 @@ from ..models.journey import Journey
 
 def score_alternative(alternative: Alternative, journey: Journey) -> dict[str, Any]:
     destination_match = alternative.destination.strip().casefold() == journey.destination.strip().casefold()
+    currency_compatible = (
+        alternative.currency.casefold() == journey.budget_currency.casefold()
+    )
     within_budget = (
         alternative.fare_amount <= journey.budget_amount
-        if alternative.fare_amount is not None and journey.budget_amount is not None
+        if (
+            alternative.fare_amount is not None
+            and journey.budget_amount is not None
+            and currency_compatible
+        )
         else None
     )
     arrives_on_time = (
@@ -22,7 +29,11 @@ def score_alternative(alternative: Alternative, journey: Journey) -> dict[str, A
     if not destination_match:
         rejected_reasons.append("Destination does not match the journey.")
     if journey.budget_amount is not None:
-        if alternative.fare_amount is None:
+        if not currency_compatible:
+            rejected_reasons.append(
+                "Fare currency does not match the journey budget currency."
+            )
+        elif alternative.fare_amount is None:
             rejected_reasons.append("Fare is unknown, so the budget constraint cannot be checked.")
         elif alternative.fare_amount > journey.budget_amount:
             rejected_reasons.append("Fare exceeds the journey budget.")
@@ -33,15 +44,25 @@ def score_alternative(alternative: Alternative, journey: Journey) -> dict[str, A
             rejected_reasons.append("Alternative arrives after the required deadline.")
 
     reasons = ["Destination matches" if destination_match else "Destination does not match"]
-    cost_score = _cost_score(alternative.fare_amount, journey.budget_amount)
+    cost_score = (
+        _cost_score(alternative.fare_amount, journey.budget_amount)
+        if currency_compatible
+        else 50.0
+    )
     time_score = _time_score(alternative.arrival_at, journey.departure_at, journey.arrive_by)
     reliability_score = (
         25.0 if "unverified" in alternative.source_label.casefold() else 100.0
     )
     if within_budget is True:
-        reasons.append("Traveller-provided fare is within budget")
+        reasons.append(
+            f"Traveller-provided fare is within budget ({alternative.currency})"
+        )
     elif within_budget is False:
-        reasons.append("Traveller-provided fare exceeds budget")
+        reasons.append(
+            f"Traveller-provided fare exceeds budget ({alternative.currency})"
+        )
+    elif not currency_compatible and journey.budget_amount is not None:
+        reasons.append("Fare and budget currencies differ, so they cannot be compared")
     else:
         reasons.append("Fare or budget is unknown")
 
@@ -103,16 +124,18 @@ def score_alternative(alternative: Alternative, journey: Journey) -> dict[str, A
         "provider": alternative.provider,
         "origin": alternative.origin,
         "destination": alternative.destination,
-        "departure_at": alternative.departure_at,
-        "arrival_at": alternative.arrival_at,
+        "departure_at": _read_as_utc(alternative.departure_at),
+        "arrival_at": _read_as_utc(alternative.arrival_at),
         "fare_amount": alternative.fare_amount,
+        "currency": alternative.currency,
         "constraints_satisfied": sorted(matched_constraints),
         "source_label": alternative.source_label,
-        "entered_at": alternative.entered_at,
+        "entered_at": _read_as_utc(alternative.entered_at),
         "data_freshness": "Not verified",
         "score": score,
         "destination_match": destination_match,
         "within_budget": within_budget,
+        "currency_compatible": currency_compatible,
         "arrives_on_time": arrives_on_time,
         "feasible": not rejected_reasons,
         "rejected_reasons": rejected_reasons,
@@ -163,3 +186,11 @@ def _as_naive_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value
     return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _read_as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)

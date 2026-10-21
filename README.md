@@ -50,9 +50,9 @@ The intended product uses a hybrid architecture combining language models with d
 ### 🧭 4. Recover
 
 - Analyze affected train, flight, cab, hotel, and appointment bookings.
-- Rank alternatives according to budget, timing, destination, and availability.
+- Rank traveller-entered alternatives according to budget, timing, destination, and stated constraints.
 - Generate an original-versus-recovered itinerary.
-- Draft hotel late-check-in messages, refund requests, and pickup updates.
+- Generate editable hotel, refund, pickup, appointment, and disruption message templates in English, Hindi, or Kannada.
 
 ---
 
@@ -65,10 +65,10 @@ The intended product uses a hybrid architecture combining language models with d
 | Booking cascade analysis | Link bookings and analyze delayed/cancelled journeys; outputs are schedule-based estimates and do not change bookings. |
 | Alternative discovery | Live transport search reports when no authorized provider is configured; traveller-entered options can be ranked. |
 | Constraint-based ranking | Excludes options with a mismatched destination, unknown/over-budget fare when a budget is set, or unknown/late arrival when a deadline is set. Feasible options use configurable 40/35/15/10 cost/time/reliability/convenience weights. |
-| Group pooling | Proposes anonymized matches only when both journeys opt in and origin, destination, and departure window match. Capacity/fare are not verified. |
-| Recovery itinerary | Shows saved reports, bookings, feasible alternatives, and next steps. Cascade analysis is available as a separate labelled simulation or analysis call. |
-| Action pack | Not implemented yet; messages are not sent or automatically drafted. |
-| Multilingual assistance | Not implemented yet. |
+| Group pooling | Proposes anonymized matches only when both journeys opt in and origin, destination, and departure window match. Live allocation, capacity, and fare verification are unavailable. |
+| Recovery itinerary | Builds and persists an original-booking view with an optional feasible alternative, disruption impacts, and required next steps. Saved plans can be retrieved by their owner. It never changes bookings or claims provider confirmation. |
+| Action pack | Generates editable deterministic templates for common provider messages. Every draft requires user review and is never sent by StrandedPool. |
+| Multilingual assistance | Action templates support English, Hindi, and Kannada; this is template substitution, not AI translation. |
 | Authentication | Registration/login, PBKDF2 password hashes, signed one-hour bearer tokens, and owner-scoped journey endpoints. |
 
 ### Implemented weather integration
@@ -76,6 +76,10 @@ The intended product uses a hybrid architecture combining language models with d
 `GET /api/v1/weather/forecast?location=Mangaluru` geocodes the requested place and retrieves hourly precipitation probability, precipitation, wind speed, and weather codes from Open-Meteo. The API returns the next six forecast hours and a deterministic low/moderate/high risk estimate with the thresholds and contributing factors in the response. Results are cached in process memory for 15 minutes. If the provider is unavailable, the endpoint returns an explicit unavailable result or clearly labelled stale cached data.
 
 Open-Meteo forecasts are weather forecasts, not transport status. The risk estimate does not confirm a service delay, cancellation, or unsafe route. Open-Meteo's public forecast API does not require a key for this integration.
+
+### Recovery itinerary and action templates
+
+`POST /api/v1/recovery/generate` builds and saves a response from an owned journey, saved bookings, an optional disruption simulation, and an optional selected feasible alternative. The response labels the source as unverified and reports that no booking changes were made. `GET /api/v1/recovery/plans/{plan_id}` retrieves a saved plan only for its owner. `POST /api/v1/actions/draft` returns an editable template in English (`en`), Hindi (`hi`), or Kannada (`kn`); drafts always require user review and are never sent.
 
 ### Booking dependencies and disruption analysis
 
@@ -154,12 +158,12 @@ The AI must not invent seat availability, fares, train status, or hotel inventor
 
 | Component | Technology |
 |---|---|
-| Frontend | React / Next.js |
-| Styling | Tailwind CSS |
-| Backend | Python, FastAPI |
-| AI integration | Gemini API or another supported LLM API |
-| Optimization | Python, OR-Tools or custom constraint-based logic |
-| Database | SQLite for MVP; PostgreSQL for production |
+| Frontend | Next.js 13.5.6, React 18.2, TypeScript 5.4 |
+| Styling | Tailwind CSS 3.4 and project CSS |
+| Backend | Python 3.11+, FastAPI 0.115, Pydantic 2 |
+| AI integration | Not configured; action messages are deterministic templates |
+| Optimization | Deterministic scoring; capacity allocation is demo-only simulation |
+| Database | SQLite locally; PostgreSQL drivers and migrations are configured but need external database validation |
 | Weather | Open-Meteo API |
 | Railway data | Authorized railway APIs or Qrail, subject to endpoint access |
 | Flight data | Amadeus Self-Service APIs, subject to quota and environment |
@@ -180,7 +184,7 @@ StrandedPool is designed to integrate real data wherever authorized access is av
 
 ---
 
-## 🤖 AI Agent Tools
+## 🤖 Planned agent tools (not implemented)
 
 The agent orchestrator can use the following tools:
 
@@ -194,7 +198,7 @@ The agent orchestrator can use the following tools:
 | `build_itinerary()` | Generate the proposed recovery itinerary. |
 | `draft_actions()` | Prepare messages and recommended next steps. |
 
-These tools should execute through validated backend functions. The LLM should not directly determine factual availability or bypass constraint checks.
+There is no agent orchestrator, Gemini integration, or AI tool-calling implementation in this repository. The action-template endpoint is deterministic, requires user review, and does not send messages.
 
 ---
 
@@ -204,12 +208,12 @@ Consider a train cancellation affecting travellers on the Mangaluru–Udupi corr
 
 1. **Detect:** The system receives a verified disruption update or a simulated event.
 2. **Analyze:** It identifies passengers whose onward journeys, pickups, or hotel check-ins may be affected.
-3. **Search:** It retrieves supported bus, train, route, or other alternatives.
-4. **Evaluate:** It filters and ranks options according to budget, timing, destination, and availability.
-5. **Pool:** It identifies compatible travellers and proposes shared cabs or alternative allocations.
+3. **Search:** Live transport inventory is unavailable; the user can enter an option they checked with a provider.
+4. **Evaluate:** It filters and ranks traveller-entered options by budget, currency, timing, destination, and stated constraints.
+5. **Pool:** It identifies anonymized opt-in matches; it does not book or allocate a real vehicle.
 6. **Recover:** Each traveller receives a personalized itinerary and an action pack.
 
-If 42 travellers need to reach Udupi, StrandedPool can aggregate their demand, allocate available options where feasible, and expose any unmet demand to transport operators.
+Transport pooling allocation is not connected to provider inventory. The repeatable demo script uses a small explicitly synthetic option set to exercise capacity, currency, consent, duplicate assignment, and comparative-cost constraints; its metrics are not evidence of real-world savings or availability.
 
 The system does not assume that an extra bus can be booked automatically; that requires operator participation or an authorized booking integration.
 
@@ -298,21 +302,41 @@ FRONTEND_ORIGIN=http://localhost:3001,http://localhost:3002,http://localhost:300
 DATABASE_URL=sqlite+aiosqlite:///./strandedpool.db
 ```
 
-The frontend defaults to `http://localhost:8000`; set `NEXT_PUBLIC_API_BASE_URL` only if the backend uses a different address. The current weather integration needs no API key; no transport, AI, or mapping credentials are configured.
+The frontend defaults to `http://localhost:8000`; set `NEXT_PUBLIC_API_BASE_URL` to the deployed backend origin in Vercel. The current weather integration needs no API key; no transport, AI, or mapping credentials are configured.
 
 Never commit `.env` files, API secrets, personal booking information, or access tokens to GitHub. Use environment variables and a committed `.env.example` containing placeholders.
 
+### Production deployment preparation (not deployed)
+
+Deployment has not been run because no hosting/database account authorization was provided. [render.yaml](./render.yaml) prepares a Render backend with migration-before-deploy and readiness health checks. PostgreSQL drivers are included; this configuration has not yet been tested against a live PostgreSQL service.
+
+1. Provision a managed PostgreSQL database in Render. Review its plan, region, backup policy, and cost before creating it.
+2. Create a Render web service from this repository using the blueprint. Set `DATABASE_URL` to the database's **internal** PostgreSQL connection string and `FRONTEND_ORIGIN` to the exact deployed Vercel origin (for example, `https://your-project.vercel.app`, without a path). `APP_ENV=production` and a generated `AUTH_SECRET_KEY` are configured in the blueprint. Never put `DATABASE_URL` or `AUTH_SECRET_KEY` into frontend variables.
+3. Import the repository into Vercel and set its Root Directory to `frontend`. Add `NEXT_PUBLIC_API_BASE_URL` as the HTTPS origin of the Render service, then deploy the frontend.
+4. Set `FRONTEND_ORIGIN` to each exact production frontend origin, redeploy the backend, and verify `https://<backend>/health`, `/api/health/ready`, and `/docs`.
+5. Confirm Render backups and restore procedure before enabling production traffic. The blueprint executes `alembic upgrade head` as a pre-deploy step; first inspect the migration and test it against a staging database. Do not run destructive migrations on production without an explicit backup and approval.
+
+Backend build/start commands are `pip install -r requirements.txt` and `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. The pre-deploy command is `alembic upgrade head`. Vercel uses `npm ci` and `npm run build` from the `frontend` directory. Use a provider-assigned HTTPS URL; do not deploy the local URL from `.env.example`.
+
 ### MVP scope and data accuracy
 
-- Journey and booking details, disruption reports, and alternative options are stored in local SQLite.
+- Journey and booking details, disruption reports, alternatives, and generated recovery plans are persisted. SQLite is used locally; PostgreSQL support is configured, but a live production database and migration have not been verified.
 - Weather forecasts are fetched from Open-Meteo and cached in process memory for 15 minutes; no weather history is persisted.
 - Disruption reports and traveller-entered transport alternatives are explicitly unverified.
-- Alternative scoring is deterministic and excludes options that fail destination, budget, or arrival-deadline hard checks; the underlying traveller-entered data is still unverified.
+- Alternative scoring is deterministic and excludes options that fail destination, budget-currency, budget, or arrival-deadline hard checks; the underlying traveller-entered data is still unverified. Timestamp inputs require UTC offsets and are normalized to UTC.
 - Scoring weights are configurable through `COST_SCORE_WEIGHT`, `TIME_SCORE_WEIGHT`, `RELIABILITY_SCORE_WEIGHT`, and `CONVENIENCE_SCORE_WEIGHT`; the values must sum to 1. Reliability for traveller-entered options is discounted because it is unverified.
-- Pooling is opt-in on both journeys and results are anonymized; proposals do not confirm vehicle capacity, fare, seat availability, or reservations.
+- Pooling matching is opt-in on both journeys and results are anonymized; the application does not allocate or confirm live vehicle capacity, fare, seat availability, or reservations.
 - Booking-cascade analysis supports dependency graphs and detects cycles; it uses entered schedule times and never changes bookings.
+- Generated itineraries use saved user-entered details and feasible traveller-entered alternatives; they are persisted, owner-scoped, unverified proposals, not booking confirmations.
+- Action messages are deterministic templates requiring review; no message delivery or AI-generated content is implemented.
 - Authentication scopes journey APIs to the account. The bearer token is stored in browser session storage, and data is not encrypted at rest.
 - There is no live transport provider, AI assistant, booking execution, password reset, or email verification. Do not enter booking references or sensitive personal information.
+
+### Repeatable simulated demo
+
+From `backend`, run `.venv\Scripts\python.exe -m scripts.demo_simulation`. It prints sample Mangaluru–Udupi travellers, linked sample train/cab/hotel bookings, a simulated cancellation and downstream analysis, feasible synthetic private/shared taxi options, opt-in group allocation, a before/after itinerary, and editable hotel/refund drafts. Every offer and allocation is explicitly labelled `SIMULATED`; nothing is reserved or sent. The report measures assignment, additional INR cost against the same sample baseline, capacity utilization, cascade count, and itinerary-generation time at runtime. Use the emitted JSON for the current run; metrics vary slightly for generation time and are not production performance claims.
+
+**Measured synthetic run (2026-10-21):** the same three sample travellers and constraints assigned all 3 travellers in both baselines. Pooling reported INR 300 additional transport cost (INR 100 per traveller) and 3/3 pooled capacity utilization; non-pooling reported INR 1,500 additional transport cost (INR 500 per traveller). The cascade identified 2 downstream bookings, and recovery-plan generation took 32.008 ms in this run. These are outputs from the deterministic demo dataset, not live prices, inventory, or real-world savings; rerun the script for current timing.
 
 ### Reproducible cascade demo
 
