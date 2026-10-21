@@ -45,6 +45,18 @@ def test_recovery_workflow_and_validation(tmp_path):
                 health = await client.get("/health")
                 assert health.status_code == 200
 
+                registration = await client.post(
+                    "/api/auth/register",
+                    json={
+                        "email": "alex@example.test",
+                        "password": "correct-horse-battery",
+                    },
+                )
+                assert registration.status_code == 201
+                client.headers["Authorization"] = (
+                    f"Bearer {registration.json()['access_token']}"
+                )
+
                 created = await client.post(
                     "/api/journeys",
                     json={
@@ -55,6 +67,7 @@ def test_recovery_workflow_and_validation(tmp_path):
                         "arrive_by": "2026-10-21T12:00:00Z",
                         "budget_amount": 1500,
                         "constraints": ["no overnight travel"],
+                        "pooling_consent": True,
                     },
                 )
                 assert created.status_code == 201
@@ -67,6 +80,7 @@ def test_recovery_workflow_and_validation(tmp_path):
                         "origin": "Mangaluru",
                         "destination": "udupi",
                         "departure_at": "2026-10-21T09:00:00Z",
+                        "pooling_consent": True,
                     },
                 )
                 assert companion.status_code == 201
@@ -106,7 +120,8 @@ def test_recovery_workflow_and_validation(tmp_path):
                     },
                 )
                 assert alternative.status_code == 201
-                assert alternative.json()["score"] == 100
+                assert alternative.json()["score"] == 30
+                assert alternative.json()["score_breakdown"]["time"] == 25
                 assert alternative.json()["source_label"] == "Traveller-provided (unverified)"
                 assert alternative.json()["data_freshness"] == "Not verified"
 
@@ -123,14 +138,18 @@ def test_recovery_workflow_and_validation(tmp_path):
                     },
                 )
                 assert rejected_option.status_code == 201
-                assert rejected_option.json()["score"] == 30
+                assert rejected_option.json()["score"] == 4
                 assert rejected_option.json()["constraints_satisfied"] == []
+                assert rejected_option.json()["feasible"] is False
+                assert len(rejected_option.json()["rejected_reasons"]) == 2
 
                 recovery = await client.get(f"/api/journeys/{journey_id}/recovery")
                 assert recovery.status_code == 200
                 assert len(recovery.json()["bookings"]) == 1
                 assert len(recovery.json()["disruptions"]) == 1
-                assert recovery.json()["pooling"]["matches"][0]["traveller_name"] == "Sam"
+                assert recovery.json()["pooling"]["matches"][0]["passenger_count"] == 1
+                assert recovery.json()["pooling"]["total_consented_passengers"] == 2
+                assert set(recovery.json()["pooling"]["matches"][0]) == {"passenger_count"}
 
                 unavailable = await client.get(
                     "/api/transport/search",
@@ -183,5 +202,87 @@ def test_readiness_endpoint_uses_database(tmp_path):
         finally:
             app.dependency_overrides.clear()
             await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_authentication_and_journey_ownership(tmp_path):
+    async def exercise() -> None:
+        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'auth-test.db'}")
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+
+        async def override_database():
+            async with session_factory() as session:
+                yield session
+
+        app.dependency_overrides[get_db] = override_database
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                unauthenticated = await client.get("/api/journeys")
+                assert unauthenticated.status_code == 401
+
+                owner_registration = await client.post(
+                    "/api/auth/register",
+                    json={"email": "owner@example.test", "password": "owner-password-123"},
+                )
+                other_registration = await client.post(
+                    "/api/auth/register",
+                    json={"email": "other@example.test", "password": "other-password-123"},
+                )
+                assert owner_registration.status_code == 201
+                assert other_registration.status_code == 201
+
+                client.headers["Authorization"] = (
+                    f"Bearer {owner_registration.json()['access_token']}"
+                )
+                created = await client.post(
+                    "/api/journeys",
+                    json={
+                        "traveller_name": "Private traveller",
+                        "origin": "Mangaluru",
+                        "destination": "Udupi",
+                        "departure_at": "2026-10-21T08:00:00Z",
+                    },
+                )
+                assert created.status_code == 201
+                journey_id = created.json()["id"]
+
+                client.headers["Authorization"] = (
+                    f"Bearer {other_registration.json()['access_token']}"
+                )
+                private_journey = await client.get(f"/api/journeys/{journey_id}/recovery")
+                listed = await client.get("/api/journeys")
+                assert private_journey.status_code == 404
+                assert listed.status_code == 200
+                assert listed.json() == []
+        finally:
+            app.dependency_overrides.clear()
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_cors_allows_bearer_authorization_header():
+    async def exercise() -> None:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            response = await client.options(
+                "/api/journeys",
+                headers={
+                    "Origin": "http://localhost:3001",
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": "authorization",
+                },
+            )
+
+        assert response.status_code == 200
+        assert "authorization" in response.headers["access-control-allow-headers"].casefold()
 
     asyncio.run(exercise())

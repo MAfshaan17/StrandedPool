@@ -12,3 +12,4 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     traveller_profiles = relationship("TravellerProfile", back_populates="user", cascade="all, delete-orphan")
+    journeys = relationship("Journey", back_populates="owner", cascade="all, delete-orphan")

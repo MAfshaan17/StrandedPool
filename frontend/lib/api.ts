@@ -11,7 +11,20 @@ export interface Journey {
   arrive_by: string | null;
   budget_amount: number | null;
   constraints: string[];
+  pooling_consent: boolean;
+  passenger_count: number;
   created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: "bearer";
+  expires_in: number;
+  user: {
+    id: number;
+    email: string;
+    created_at: string | null;
+  };
 }
 
 export interface Disruption {
@@ -43,6 +56,8 @@ export interface Alternative {
   destination_match: boolean;
   within_budget: boolean | null;
   arrives_on_time: boolean | null;
+  feasible: boolean;
+  rejected_reasons: string[];
   reasons: string[];
 }
 
@@ -61,17 +76,57 @@ export interface JourneyBooking {
   provider: string;
   reference: string | null;
   details: string | null;
+  origin: string | null;
+  destination: string | null;
+  scheduled_start: string | null;
+  scheduled_end: string | null;
+  timezone: string;
+  latest_acceptable_arrival: string | null;
+  price_amount: number | null;
+  currency: string;
+  status: string;
+  verification_status: string;
   created_at: string;
+}
+
+export interface BookingDependency {
+  id: number;
+  journey_id: number;
+  predecessor_booking_id: number;
+  downstream_booking_id: number;
+  dependency_type: string;
+}
+
+export interface CascadeAnalysis {
+  status: string;
+  source_label: string;
+  affected_booking_id: number;
+  disruption_status: string;
+  delay_minutes: number | null;
+  impacts: Array<{
+    booking_id: number;
+    kind: string;
+    impact: string;
+    severity: string;
+    directly_affected: boolean;
+    expected_arrival: string | null;
+    reason: string;
+  }>;
+  cycles_detected: Array<{ from_booking_id: number; to_booking_id: number }>;
+  automatically_cancelled_bookings: number[];
+  limitations: string[];
 }
 
 export interface RecoveryPlan {
   journey: Journey;
   disruptions: Disruption[];
   bookings: JourneyBooking[];
+  dependencies: BookingDependency[];
   alternatives: Alternative[];
   pooling: {
     status: string;
-    matches: Array<{ journey_id: number; traveller_name: string }>;
+    matches: Array<{ passenger_count: number }>;
+    total_consented_passengers: number;
     availability: string;
   };
   next_steps: string[];
@@ -129,6 +184,13 @@ export async function apiRequest<T>(
     const headers = new Headers(init.headers);
     if (init.body !== undefined && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
+    }
+    if (
+      typeof window !== "undefined" &&
+      !headers.has("Authorization")
+    ) {
+      const token = window.sessionStorage.getItem("strandedpool_access_token");
+      if (token) headers.set("Authorization", `Bearer ${token}`);
     }
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,

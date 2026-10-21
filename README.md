@@ -1,7 +1,7 @@
 # 🚆 StrandedPool
 ### Travel disruption recovery, together
 
-**StrandedPool is an early-stage travel recovery MVP.** It stores journeys, traveller-reported disruptions, bookings, and user-entered alternatives; ranks the entered alternatives; and now retrieves Open-Meteo weather forecasts with an explicitly estimated risk indicator. Live transport inventory, booking cascade analysis, authentication, booking execution, and the AI assistant described in the product vision are not implemented yet.
+**StrandedPool is an early-stage travel recovery MVP.** It provides account-scoped journeys, booking dependency/cascade analysis, explicit disruption simulations, hard-constraint filtering for traveller-entered alternatives, opt-in anonymized pooling proposals, and Open-Meteo forecast risk estimates. Live transport inventory, booking execution, the Gemini assistant, and the broader product vision are not implemented yet.
 
 The long-term product vision is to help travellers find authorized alternatives, protect downstream bookings, and coordinate recovery for groups—not just individuals.
 
@@ -62,19 +62,39 @@ The intended product uses a hybrid architecture combining language models with d
 |---|---|
 | Disruption reports | Save traveller-reported disruptions; these are not verified against transport operators. |
 | Weather forecast | View a six-hour Open-Meteo forecast and transparent estimated weather-risk indicator. |
-| Booking cascade analysis | Not implemented yet; the MVP stores booking details but does not evaluate dependencies. |
+| Booking cascade analysis | Link bookings and analyze delayed/cancelled journeys; outputs are schedule-based estimates and do not change bookings. |
 | Alternative discovery | Live transport search reports when no authorized provider is configured; traveller-entered options can be ranked. |
-| Constraint-based ranking | Deterministically rank traveller-entered options against destination, stated budget, deadline, and stated constraints. |
-| Group pooling | Show limited proposals for journeys with matching destinations and departure times; consent, capacity, and fares are not verified. |
-| Recovery itinerary | Show saved reports, bookings, alternatives, and general next steps; automated cascade-based plans are not implemented. |
+| Constraint-based ranking | Excludes options with a mismatched destination, unknown/over-budget fare when a budget is set, or unknown/late arrival when a deadline is set. Feasible options use configurable 40/35/15/10 cost/time/reliability/convenience weights. |
+| Group pooling | Proposes anonymized matches only when both journeys opt in and origin, destination, and departure window match. Capacity/fare are not verified. |
+| Recovery itinerary | Shows saved reports, bookings, feasible alternatives, and next steps. Cascade analysis is available as a separate labelled simulation or analysis call. |
 | Action pack | Not implemented yet; messages are not sent or automatically drafted. |
 | Multilingual assistance | Not implemented yet. |
+| Authentication | Registration/login, PBKDF2 password hashes, signed one-hour bearer tokens, and owner-scoped journey endpoints. |
 
 ### Implemented weather integration
 
 `GET /api/v1/weather/forecast?location=Mangaluru` geocodes the requested place and retrieves hourly precipitation probability, precipitation, wind speed, and weather codes from Open-Meteo. The API returns the next six forecast hours and a deterministic low/moderate/high risk estimate with the thresholds and contributing factors in the response. Results are cached in process memory for 15 minutes. If the provider is unavailable, the endpoint returns an explicit unavailable result or clearly labelled stale cached data.
 
 Open-Meteo forecasts are weather forecasts, not transport status. The risk estimate does not confirm a service delay, cancellation, or unsafe route. Open-Meteo's public forecast API does not require a key for this integration.
+
+### Booking dependencies and disruption analysis
+
+Create bookings with schedule timestamps that include a UTC offset, then link predecessor and downstream bookings with:
+
+```text
+POST /api/journeys/{journey_id}/bookings/{booking_id}/dependencies
+{"downstream_booking_id": 2, "dependency_type": "pickup"}
+```
+
+Analyze a reported delay/cancellation with `POST /api/v1/disruptions/analyze`, or use `POST /api/v1/disruptions/simulate` to explicitly label a demo simulation. A delay requires `delay_minutes`. The analyzer traverses the booking graph, detects cycles, and identifies downstream connections that appear missed or at risk. It never cancels or changes a booking, and cannot verify traveller-entered times.
+
+### Authentication and data ownership
+
+Journey, booking, disruption, recovery, dashboard, and alternative endpoints require a bearer token obtained from `POST /api/auth/register` or `/api/auth/login`. Passwords are PBKDF2-SHA256 hashed; access tokens expire after one hour. The UI holds the token in browser `sessionStorage`. Login and registration have an in-process IP rate limit, which is not shared across multiple backend instances.
+
+For local development, the backend generates an ephemeral signing key when `AUTH_SECRET_KEY` is unset; tokens become invalid after a backend restart. For production, configure a stable randomly generated secret of at least 32 characters and use HTTPS. The value in `.env.example` is only a placeholder and must be replaced. The existing MVP does not encrypt stored trip details at rest or support password reset/email verification.
+
+The account-ownership migration leaves pre-existing journeys and disruption reports with a null owner so they are not exposed to newly registered accounts. Those legacy records remain in SQLite but are not visible through account-scoped APIs; back them up and plan an explicit ownership/claim migration before using existing data with accounts.
 
 ---
 
@@ -250,6 +270,8 @@ http://localhost:8000/health
 http://localhost:8000/api/health/ready
 ```
 
+Create `backend/.env` from `.env.example` if desired, and replace the placeholder before relying on authentication across backend restarts. In production set `APP_ENV=production` and a stable `AUTH_SECRET_KEY`.
+
 ### 3. Set up the frontend
 
 Create `frontend/.env.local` with `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`, then run:
@@ -285,9 +307,22 @@ Never commit `.env` files, API secrets, personal booking information, or access 
 - Journey and booking details, disruption reports, and alternative options are stored in local SQLite.
 - Weather forecasts are fetched from Open-Meteo and cached in process memory for 15 minutes; no weather history is persisted.
 - Disruption reports and traveller-entered transport alternatives are explicitly unverified.
-- Alternative ranking is deterministic and uses the destination, stated budget, and arrival deadline when supplied.
-- Pooling matches are proposals based on destination and departure time only; they do not confirm consent, vehicle capacity, fare, or availability.
-- Dependency cascade analysis, trip simulation, authentication, encryption, and booking execution are not implemented. There is no live transport provider. Do not enter booking references or sensitive personal information.
+- Alternative scoring is deterministic and excludes options that fail destination, budget, or arrival-deadline hard checks; the underlying traveller-entered data is still unverified.
+- Scoring weights are configurable through `COST_SCORE_WEIGHT`, `TIME_SCORE_WEIGHT`, `RELIABILITY_SCORE_WEIGHT`, and `CONVENIENCE_SCORE_WEIGHT`; the values must sum to 1. Reliability for traveller-entered options is discounted because it is unverified.
+- Pooling is opt-in on both journeys and results are anonymized; proposals do not confirm vehicle capacity, fare, seat availability, or reservations.
+- Booking-cascade analysis supports dependency graphs and detects cycles; it uses entered schedule times and never changes bookings.
+- Authentication scopes journey APIs to the account. The bearer token is stored in browser session storage, and data is not encrypted at rest.
+- There is no live transport provider, AI assistant, booking execution, password reset, or email verification. Do not enter booking references or sensitive personal information.
+
+### Reproducible cascade demo
+
+1. Register or sign in on the frontend.
+2. Add a journey and one or more bookings. Include each booking's scheduled start/end with offsets.
+3. Link bookings in sequence using the dependency form.
+4. Select **Simulate cancellation** on the first booking.
+5. Review the cascade statuses; the response is labelled `SIMULATED` and does not alter stored booking status.
+
+The simulation uses only the journey's saved booking data. It does not create fake transport inventory or provider confirmations.
 
 ---
 

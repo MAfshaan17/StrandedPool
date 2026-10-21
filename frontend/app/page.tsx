@@ -5,6 +5,9 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import {
   apiRequest,
   Alternative,
+  AuthResponse,
+  BookingDependency,
+  CascadeAnalysis,
   Dashboard,
   JourneyBooking,
   RecoveryPlan,
@@ -33,6 +36,11 @@ function formatFare(value: number | null): string {
 }
 
 export default function Home() {
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [selectedJourneyId, setSelectedJourneyId] = useState("");
   const [recovery, setRecovery] = useState<RecoveryPlan | null>(null);
@@ -50,6 +58,15 @@ export default function Home() {
   const [weatherForecast, setWeatherForecast] = useState<WeatherForecast | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState("");
+  const [cascadeAnalysis, setCascadeAnalysis] = useState<CascadeAnalysis | null>(null);
+  const [cascadeError, setCascadeError] = useState("");
+  const [analyzingCascade, setAnalyzingCascade] = useState(false);
+  const [dependencyError, setDependencyError] = useState("");
+
+  useEffect(() => {
+    setAccessToken(window.sessionStorage.getItem("strandedpool_access_token"));
+    setAuthReady(true);
+  }, []);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -72,8 +89,47 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!authReady) return;
+    if (!accessToken) {
+      setDashboard(null);
+      setRecovery(null);
+      setLoading(false);
+      return;
+    }
     void loadDashboard();
-  }, [loadDashboard]);
+  }, [authReady, accessToken, loadDashboard]);
+
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setAuthLoading(true);
+    setAuthError("");
+    try {
+      const result = await apiRequest<AuthResponse>(
+        authMode === "register" ? "/api/auth/register" : "/api/auth/login",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            email: form.get("email"),
+            password: form.get("password"),
+          }),
+        },
+      );
+      window.sessionStorage.setItem("strandedpool_access_token", result.access_token);
+      setAccessToken(result.access_token);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Authentication failed.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  function signOut() {
+    window.sessionStorage.removeItem("strandedpool_access_token");
+    setAccessToken(null);
+    setDashboard(null);
+    setRecovery(null);
+  }
 
   useEffect(() => {
     if (!selectedJourneyId) {
@@ -120,6 +176,8 @@ export default function Home() {
           budget_amount: form.get("budget_amount")
             ? Number(form.get("budget_amount"))
             : null,
+          pooling_consent: form.get("pooling_consent") === "on",
+          passenger_count: Number(form.get("passenger_count") || 1),
           constraints: String(form.get("constraints") ?? "")
             .split(",")
             .map((value) => value.trim())
@@ -176,7 +234,7 @@ export default function Home() {
     setNotice("");
     const form = new FormData(event.currentTarget);
     try {
-      await apiRequest<Alternative>(
+      const savedAlternative = await apiRequest<Alternative>(
         `/api/journeys/${selectedJourneyId}/alternatives`,
         {
           method: "POST",
@@ -199,7 +257,11 @@ export default function Home() {
         },
       );
       formElement.reset();
-      setNotice("Alternative saved and ranked. Details are traveller-provided, not verified.");
+      setNotice(
+        savedAlternative.feasible
+          ? "Alternative saved and included in the feasible ranking. Details are traveller-provided, not verified."
+          : `Option saved but excluded from recommendations: ${savedAlternative.rejected_reasons.join(" ")}`,
+      );
       setRecovery(await apiRequest<RecoveryPlan>(
         `/api/journeys/${selectedJourneyId}/recovery`,
       ));
@@ -229,6 +291,22 @@ export default function Home() {
             kind: form.get("kind"),
             provider: form.get("provider"),
             details: form.get("details") || null,
+            origin: form.get("origin") || null,
+            destination: form.get("destination") || null,
+            scheduled_start: form.get("scheduled_start")
+              ? toIsoDate(String(form.get("scheduled_start")))
+              : null,
+            scheduled_end: form.get("scheduled_end")
+              ? toIsoDate(String(form.get("scheduled_end")))
+              : null,
+            timezone: form.get("timezone") || "UTC",
+            latest_acceptable_arrival: form.get("latest_acceptable_arrival")
+              ? toIsoDate(String(form.get("latest_acceptable_arrival")))
+              : null,
+            price_amount: form.get("price_amount")
+              ? Number(form.get("price_amount"))
+              : null,
+            currency: form.get("currency") || "INR",
           }),
         },
       );
@@ -241,6 +319,62 @@ export default function Home() {
       setBookingError(error instanceof Error ? error.message : "Unable to save this booking.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function submitDependency(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedJourneyId) return;
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    setDependencyError("");
+    try {
+      const predecessorId = String(form.get("predecessor_booking_id"));
+      await apiRequest<BookingDependency>(
+        `/api/journeys/${selectedJourneyId}/bookings/${predecessorId}/dependencies`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            downstream_booking_id: Number(form.get("downstream_booking_id")),
+            dependency_type: form.get("dependency_type"),
+          }),
+        },
+      );
+      setRecovery(await apiRequest<RecoveryPlan>(
+        `/api/journeys/${selectedJourneyId}/recovery`,
+      ));
+      setNotice("Booking dependency saved.");
+    } catch (error) {
+      setDependencyError(
+        error instanceof Error ? error.message : "Unable to save this dependency.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function simulateCancellation(bookingId: number) {
+    if (!selectedJourneyId) return;
+    setAnalyzingCascade(true);
+    setCascadeError("");
+    setCascadeAnalysis(null);
+    try {
+      setCascadeAnalysis(
+        await apiRequest<CascadeAnalysis>("/api/v1/disruptions/simulate", {
+          method: "POST",
+          body: JSON.stringify({
+            journey_id: Number(selectedJourneyId),
+            affected_booking_id: bookingId,
+            disruption_status: "cancelled",
+          }),
+        }),
+      );
+    } catch (error) {
+      setCascadeError(
+        error instanceof Error ? error.message : "Unable to analyze this disruption.",
+      );
+    } finally {
+      setAnalyzingCascade(false);
     }
   }
 
@@ -298,6 +432,63 @@ export default function Home() {
   );
   const statusText = loading ? "Connecting" : apiError ? "Needs attention" : "Connected";
 
+  if (!authReady) {
+    return <main className="shell auth-shell"><p className="empty-copy">Loading your secure session…</p></main>;
+  }
+
+  if (!accessToken) {
+    return (
+      <main className="shell auth-shell">
+        <a className="brand auth-brand" href="#" aria-label="StrandedPool home">
+          <span className="brand-mark">S</span>
+          <span>stranded<span className="brand-accent">pool</span></span>
+        </a>
+        <section className="panel auth-panel">
+          <p className="eyebrow">PRIVATE TRAVEL RECOVERY</p>
+          <h1>{authMode === "login" ? "Welcome back" : "Create your account"}</h1>
+          <p className="section-subtitle">
+            Journeys and booking details are available only after signing in.
+          </p>
+          <form className="form-grid auth-form" onSubmit={submitAuth}>
+            <label className="form-field form-field-wide">
+              <span>Email</span>
+              <input className="input" name="email" type="email" autoComplete="email" required maxLength={254} />
+            </label>
+            <label className="form-field form-field-wide">
+              <span>Password{authMode === "register" ? " · at least 12 characters" : ""}</span>
+              <input
+                className="input"
+                name="password"
+                type="password"
+                autoComplete={authMode === "register" ? "new-password" : "current-password"}
+                required
+                minLength={authMode === "register" ? 12 : 1}
+                maxLength={128}
+              />
+            </label>
+            {authError && <p className="form-error form-field-wide" role="alert">{authError}</p>}
+            <button className="button button-primary form-field-wide" disabled={authLoading}>
+              {authLoading ? "Please wait…" : authMode === "register" ? "Create account" : "Sign in"}
+            </button>
+          </form>
+          <button
+            className="text-button auth-toggle"
+            type="button"
+            onClick={() => {
+              setAuthMode(authMode === "login" ? "register" : "login");
+              setAuthError("");
+            }}
+          >
+            {authMode === "login" ? "New to StrandedPool? Create an account" : "Already registered? Sign in"}
+          </button>
+          <p className="form-hint">
+            Use a unique password. For production, configure a stable secret and HTTPS.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -308,6 +499,7 @@ export default function Home() {
         <div className={`connection ${apiError ? "connection-error" : ""}`}>
           <span className="connection-dot" />
           API {statusText}
+          <button className="text-button" type="button" onClick={signOut}>Sign out</button>
         </div>
       </header>
 
@@ -338,7 +530,14 @@ export default function Home() {
           <button className="text-button" onClick={() => void loadDashboard()}>Try again</button>
         </div>
       )}
-      {notice && <div className="alert alert-success" role="status">{notice}</div>}
+      {notice && (
+        <div
+          className={`alert ${notice.startsWith("Option saved but excluded") ? "alert-warning" : "alert-success"}`}
+          role="status"
+        >
+          {notice}
+        </div>
+      )}
 
       <div className="notice-bar">
         <span className="notice-icon">i</span>
@@ -533,6 +732,14 @@ export default function Home() {
               <span>Constraints <em>Optional, comma-separated</em></span>
               <input className="input" name="constraints" maxLength={500} placeholder="e.g. wheelchair access, no overnight travel" />
             </label>
+            <label className="form-field">
+              <span>Passengers</span>
+              <input className="input" name="passenger_count" type="number" min="1" max="12" defaultValue="1" />
+            </label>
+            <label className="consent-field form-field">
+              <input name="pooling_consent" type="checkbox" />
+              <span>Opt in to anonymous-compatible pooling proposals</span>
+            </label>
             {journeyError && <p className="form-error form-field-wide" role="alert">{journeyError}</p>}
             <button className="button button-primary form-field-wide" disabled={saving}>
               {saving ? "Saving…" : "Save journey"}
@@ -599,6 +806,30 @@ export default function Home() {
             <label className="form-field form-field-wide">
               <span>Notes <em>Optional</em></span>
               <textarea className="input textarea" name="details" maxLength={2000} placeholder="Non-sensitive details about this booking." />
+            </label>
+            <label className="form-field">
+              <span>Origin <em>Optional</em></span>
+              <input className="input" name="origin" maxLength={120} />
+            </label>
+            <label className="form-field">
+              <span>Destination <em>Optional</em></span>
+              <input className="input" name="destination" maxLength={120} />
+            </label>
+            <label className="form-field">
+              <span>Scheduled start <em>Optional</em></span>
+              <input className="input" name="scheduled_start" type="datetime-local" />
+            </label>
+            <label className="form-field">
+              <span>Scheduled end / arrival <em>Optional</em></span>
+              <input className="input" name="scheduled_end" type="datetime-local" />
+            </label>
+            <label className="form-field">
+              <span>Timezone</span>
+              <input className="input" name="timezone" maxLength={80} defaultValue="Asia/Kolkata" />
+            </label>
+            <label className="form-field">
+              <span>Price <em>Optional</em></span>
+              <input className="input" name="price_amount" type="number" min="0" step="0.01" />
             </label>
             <p className="form-hint form-field-wide">This local MVP has no sign-in or encryption. Do not enter booking references or sensitive personal information.</p>
             {bookingError && <p className="form-error form-field-wide" role="alert">{bookingError}</p>}
@@ -691,7 +922,9 @@ export default function Home() {
                 </article>
               ))
             ) : (
-              <p className="empty-copy">No alternative options added for this journey yet.</p>
+              <p className="empty-copy">
+                No feasible alternative currently meets the hard constraints. Infeasible or unknown options are excluded from recommendations.
+              </p>
             )}
           </div>
         </div>
@@ -715,12 +948,84 @@ export default function Home() {
                       <div>
                         <strong>{booking.provider}</strong>
                         <span>{booking.kind}{booking.details ? ` · ${booking.details}` : ""}</span>
+                        <span>
+                          {booking.scheduled_start ? `Starts ${formatDate(booking.scheduled_start)}` : "Schedule not provided"}
+                          {booking.scheduled_end ? ` · Ends ${formatDate(booking.scheduled_end)}` : ""}
+                          {` · ${booking.verification_status}`}
+                        </span>
                       </div>
+                      <button
+                        className="text-button"
+                        type="button"
+                        onClick={() => void simulateCancellation(booking.id)}
+                        disabled={analyzingCascade}
+                        title="Runs a labelled simulation only; it does not change this booking."
+                      >
+                        Simulate cancellation
+                      </button>
                     </article>
                   ))}
+                  {recovery.bookings.length > 1 && (
+                    <form className="form-grid dependency-form" onSubmit={submitDependency}>
+                      <label className="form-field">
+                        <span>Booking that happens first</span>
+                        <select className="input" name="predecessor_booking_id" required defaultValue="">
+                          <option value="" disabled>Select a booking</option>
+                          {recovery.bookings.map((booking) => (
+                            <option key={booking.id} value={booking.id}>{booking.provider} · #{booking.id}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="form-field">
+                        <span>Downstream booking</span>
+                        <select className="input" name="downstream_booking_id" required defaultValue="">
+                          <option value="" disabled>Select a booking</option>
+                          {recovery.bookings.map((booking) => (
+                            <option key={booking.id} value={booking.id}>{booking.provider} · #{booking.id}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="form-field">
+                        <span>Relationship</span>
+                        <select className="input" name="dependency_type" defaultValue="connection">
+                          <option value="connection">Connection</option>
+                          <option value="pickup">Pickup</option>
+                          <option value="check_in">Check-in</option>
+                          <option value="appointment">Appointment</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </label>
+                      {dependencyError && <p className="form-error form-field-wide" role="alert">{dependencyError}</p>}
+                      <button className="button button-secondary form-field-wide" disabled={saving}>
+                        Link downstream booking
+                      </button>
+                    </form>
+                  )}
+                  {recovery.dependencies.length > 0 && (
+                    <p className="form-hint">
+                      Linked dependencies: {recovery.dependencies.map((edge) => `#${edge.predecessor_booking_id} → #${edge.downstream_booking_id}`).join(", ")}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <p className="empty-copy">No downstream bookings recorded for this journey.</p>
+              )}
+              {cascadeError && <p className="form-error" role="alert">{cascadeError}</p>}
+              {cascadeAnalysis && (
+                <section className="cascade-results" aria-live="polite">
+                  <strong>SIMULATED cascade · no bookings changed</strong>
+                  <ul className="steps-list">
+                    {cascadeAnalysis.impacts.map((impact) => (
+                      <li key={`${impact.booking_id}-${impact.impact}`}>
+                        <span className={`impact-badge impact-${impact.severity}`}>{impact.impact.replaceAll("_", " ")}</span>
+                        <span>Booking #{impact.booking_id} · {impact.kind}: {impact.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {cascadeAnalysis.limitations.map((limitation) => (
+                    <p className="form-hint" key={limitation}>{limitation}</p>
+                  ))}
+                </section>
               )}
               <ol className="steps-list steps-after-bookings">
                 {recovery.next_steps.map((step, index) => (
@@ -744,21 +1049,26 @@ export default function Home() {
           </div>
           {recovery?.pooling.matches.length ? (
             <>
-              <p className="pool-summary">Journeys with the same destination and a departure within two hours:</p>
+              <p className="pool-summary">
+                Consenting journeys with the same origin and destination and a departure within two hours.
+                Combined stated passenger count: {recovery.pooling.total_consented_passengers}.
+              </p>
               <ul className="pool-list">
                 {recovery.pooling.matches.map((match) => (
-                  <li key={match.journey_id}>
-                    <span className="pool-avatar">{match.traveller_name.slice(0, 1).toUpperCase()}</span>
-                    <span>{match.traveller_name}<small>Journey #{match.journey_id}</small></span>
+                  <li key={match.passenger_count}>
+                    <span className="pool-avatar">•</span>
+                    <span>Opted-in traveller group<small>{match.passenger_count} passenger(s)</small></span>
                   </li>
                 ))}
               </ul>
-              <p className="pool-disclaimer">Proposal only. No vehicle, seats, fare or consent is verified.</p>
+              <p className="pool-disclaimer">Proposal only. Participants opted in to matching; no vehicle, seats, fare, or booking is verified.</p>
             </>
           ) : (
             <p className="empty-copy">
-              {selectedJourneyId
-                ? "No matching journeys yet. Similar destinations and departure times can form a coordination proposal."
+              {recovery?.pooling.status === "consent_required"
+                ? "Opt in when creating a journey before it can appear in pooling proposals."
+                : selectedJourneyId
+                ? "No other opted-in journeys match origin, destination, and departure window."
                 : "Add a journey to check for compatible travellers."}
             </p>
           )}

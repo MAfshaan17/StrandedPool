@@ -173,6 +173,17 @@ h2 { margin-bottom: 0; font-size: 18px; letter-spacing: -.35px; }
 .step-number { flex: 0 0 27px; width: 27px; height: 27px; display: grid; place-items: center; border-radius: 8px; background: #eff6f4; color: var(--teal); font-size: 9px; font-weight: 700; }
 .booking-list { display: grid; gap: 12px; }
 .booking-item { display: flex; align-items: flex-start; gap: 10px; }
+.booking-item > div { min-width: 0; flex: 1; }
+.booking-item .text-button { flex: 0 0 auto; font-size: 10px; }
+.dependency-form { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.cascade-results { display: grid; gap: 11px; margin-top: 16px; padding: 13px; border: 1px solid #f1dfb9; border-radius: 9px; background: #fffaf0; font-size: 11px; }
+.impact-badge { flex: 0 0 auto; padding: 4px 7px; border-radius: 99px; background: #fff; color: #795d32; font-size: 9px; font-weight: 700; text-transform: capitalize; }
+.impact-high { color: #9a403b; }
+.impact-medium { color: #946327; }
+.impact-low { color: #386b58; }
+.consent-field { display: flex; align-items: flex-start; gap: 8px; }
+.consent-field input { margin: 2px 0 0; accent-color: var(--teal); }
+.consent-field span { line-height: 1.5; }
 .booking-kind { flex: 0 0 25px; width: 25px; height: 25px; display: grid; place-items: center; border-radius: 7px; background: #f1f4f3; color: #617477; font-size: 10px; font-weight: 700; }
 .booking-item strong { display: block; margin: 1px 0 4px; font-size: 11px; }
 .booking-item div > span { display: block; color: #78888c; font-size: 10px; line-height: 1.5; }
@@ -185,6 +196,7 @@ h2 { margin-bottom: 0; font-size: 18px; letter-spacing: -.35px; }
 .alert { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 15px; padding: 12px 14px; border-radius: 8px; font-size: 11px; }
 .alert-error { border: 1px solid #f0d2c7; background: #fff7f3; color: #844635; }
 .alert-success { border: 1px solid #cee8dc; background: #eef8f3; color: #2c7055; }
+.alert-warning { border: 1px solid #f1dfb9; background: #fffaf0; color: #795d32; }
 .alert strong { font-size: 12px; }
 .text-button { border: 0; background: transparent; color: var(--teal-dark); cursor: pointer; font-weight: 700; text-decoration: underline; }
 .footer { display: flex; justify-content: space-between; gap: 12px; padding: 22px 0 30px; color: #869396; font-size: 10px; }

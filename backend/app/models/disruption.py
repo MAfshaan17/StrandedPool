@@ -9,6 +9,12 @@ class Disruption(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     journey_id = Column(Integer, ForeignKey("journeys.id", ondelete="CASCADE"), nullable=True)
+    reporter_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     title = Column(String(120), nullable=False)
     description = Column(Text, nullable=False)
     transport_mode = Column(String(40), nullable=True)
