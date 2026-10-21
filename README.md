@@ -318,14 +318,18 @@ Only run scripts that exist in `package.json`. For a full demo, verify trip crea
 
 ## 🎬 Demo Scenario
 
-A useful demonstration is a **simulated train cancellation on the Mangaluru–Udupi corridor**:
+The dashboard uses button-based **Overview**, **My trip**, **Recovery**, and **History** sections, so the main workflow is available without scrolling through every feature.
 
-1. Create a trip with a train, cab pickup, and hotel booking.
-2. Trigger a clearly labelled simulated cancellation.
-3. Review the affected booking cascade.
-4. Compare alternatives from connected sources or labelled demo inventory.
-5. Match consenting travellers and propose a shared cab when feasible.
-6. Generate a recovery itinerary and editable action messages.
+For a repeatable demonstration, sign in and select **Load demo sample**. It creates one sample trip in the signed-in account with a train, onward cab, hotel, linked booking dependencies, a simulated cancellation, a simulated taxi alternative, and a saved recovery plan on the **Mangaluru–Udupi corridor**. Each sample item is clearly marked as simulated and is not a real booking, disruption report, fare quote, or transport inventory. After creation, the button opens the existing sample rather than creating another one.
+
+The **History** section retrieves the account's saved trips and, for the selected trip, its bookings, alternatives, disruption reports, and saved recovery plans. Generated action messages remain editable in the current session; they are not persisted as history or sent to providers.
+
+The sample workflow is:
+
+1. Load the demo sample and open **History**.
+2. Review the linked bookings and the clearly labelled simulated cancellation.
+3. Inspect the saved recovery plan and proposed (not booked) taxi alternative.
+4. Open **Recovery** to review cascade analysis, alternative options, and an editable action message.
 
 Evaluate pooling against a non-pooling baseline using the same dataset. Publish actual measured results and label simulated metrics accordingly—do not invent percentages or live availability.
 
