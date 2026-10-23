@@ -365,11 +365,6 @@ Mark items complete only after the corresponding functionality has been tested.
 - **Demo video:** `<YOUR_DEMO_URL>`
 - **Deployment:** `<YOUR_DEPLOYMENT_URL>`
 
-## 📄 License
-
-Add a suitable open-source license before inviting reuse or redistribution. Until a license is selected, reuse permissions should not be assumed.
-
----
 
 <div align="center">
 
