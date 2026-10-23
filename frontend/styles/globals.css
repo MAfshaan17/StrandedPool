@@ -79,7 +79,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .section-nav-button { min-height: 38px; padding: 9px 14px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 700; }
 .section-nav-button:hover { background: #f3f7f5; color: var(--ink); }
 .section-nav-button-active { background: #eaf5f1; color: var(--teal-dark); }
-.demo-button { margin-left: auto; }
 .hero {
   display: flex;
   align-items: flex-end;
@@ -280,5 +279,4 @@ h2 { margin-bottom: 0; font-size: 18px; letter-spacing: -.35px; }
   .notice-bar { align-items: flex-start; }
   .section-nav { gap: 4px; }
   .section-nav-button { flex: 1 1 calc(50% - 4px); }
-  .demo-button { flex: 1 1 100%; margin-left: 0; }
 }

@@ -320,16 +320,9 @@ Only run scripts that exist in `package.json`. For a full demo, verify trip crea
 
 The dashboard uses button-based **Overview**, **My trip**, **Recovery**, and **History** sections, so the main workflow is available without scrolling through every feature.
 
-For a repeatable demonstration, sign in and select **Load demo sample**. It creates one sample trip in the signed-in account with a train, onward cab, hotel, linked booking dependencies, a simulated cancellation, a simulated taxi alternative, and a saved recovery plan on the **Mangaluru–Udupi corridor**. Each sample item is clearly marked as simulated and is not a real booking, disruption report, fare quote, or transport inventory. After creation, the button opens the existing sample rather than creating another one.
+Use **My trip** to enter your actual journey and bookings, then use **Recovery** to record a traveller-reported disruption, assess downstream effects, add alternatives you have checked, and create a proposed recovery plan. **History** displays records saved to the signed-in account. Editable action messages are not persisted and are never sent automatically.
 
-The **History** section retrieves the account's saved trips and, for the selected trip, its bookings, alternatives, disruption reports, and saved recovery plans. Generated action messages remain editable in the current session; they are not persisted as history or sent to providers.
-
-The sample workflow is:
-
-1. Load the demo sample and open **History**.
-2. Review the linked bookings and the clearly labelled simulated cancellation.
-3. Inspect the saved recovery plan and proposed (not booked) taxi alternative.
-4. Open **Recovery** to review cascade analysis, alternative options, and an editable action message.
+No transport-inventory provider is currently connected. The application does not seed or claim fictional records as real trips, bookings, disruption reports, fares, or availability. Journey and booking details are traveller-entered and unverified; proposals remain unbooked until confirmed directly with a provider. To demonstrate the workflow, use records you are authorized to share and label any illustrative values as sample data.
 
 Evaluate pooling against a non-pooling baseline using the same dataset. Publish actual measured results and label simulated metrics accordingly—do not invent percentages or live availability.
 

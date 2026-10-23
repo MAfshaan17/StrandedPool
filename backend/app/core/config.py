@@ -13,7 +13,9 @@ DEFAULT_FRONTEND_ORIGINS = (
     "http://localhost:3002,"
     "http://127.0.0.1:3002,"
     "http://localhost:3003,"
-    "http://127.0.0.1:3003"
+    "http://127.0.0.1:3003,"
+    "http://localhost:3007,"
+    "http://127.0.0.1:3007"
 )
 
 
@@ -65,7 +67,18 @@ class Settings(BaseSettings):
 
     @property
     def allowed_origins(self) -> list[str]:
-        return [origin.strip() for origin in self.frontend_origin.split(",") if origin.strip()]
+        origins = [
+            origin.strip()
+            for origin in self.frontend_origin.split(",")
+            if origin.strip()
+        ]
+        if self.app_env == "development":
+            origins.extend(
+                f"http://{host}:{port}"
+                for host in ("localhost", "127.0.0.1")
+                for port in range(3000, 3011)
+            )
+        return list(dict.fromkeys(origins))
 
     model_config = SettingsConfigDict(
         case_sensitive=False,

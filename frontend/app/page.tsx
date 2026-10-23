@@ -81,8 +81,6 @@ export default function Home() {
   const [historyDisruptions, setHistoryDisruptions] = useState<Dashboard["recent_disruptions"]>([]);
   const [historyDisruptionsLoading, setHistoryDisruptionsLoading] = useState(false);
   const [historyDisruptionError, setHistoryDisruptionError] = useState("");
-  const [demoLoading, setDemoLoading] = useState(false);
-  const [demoError, setDemoError] = useState("");
 
   useEffect(() => {
     setAccessToken(window.sessionStorage.getItem("strandedpool_access_token"));
@@ -561,208 +559,6 @@ export default function Home() {
     }
   }
 
-  async function createDemoSample() {
-    setDemoLoading(true);
-    setDemoError("");
-    setNotice("");
-    let journeyId: number | null = null;
-    let completedStep = "creating the sample journey";
-    try {
-        const existingSample = dashboard?.journeys.find(
-          (journey) => journey.traveller_name === "DEMO SAMPLE",
-        );
-        if (existingSample) {
-          journeyId = existingSample.id;
-          setNotice("Your demo sample is already saved. Opening its history.");
-          setSelectedJourneyId(String(existingSample.id));
-          setActiveSection("history");
-          await loadRecoveryDetails(existingSample.id);
-          return;
-        }
-
-        const departure = new Date();
-        departure.setUTCDate(departure.getUTCDate() + 2);
-        departure.setUTCHours(8, 0, 0, 0);
-        const at = (hours: number, minutes = 0) => {
-          const value = new Date(departure);
-          value.setUTCHours(hours, minutes, 0, 0);
-          return value.toISOString();
-        };
-
-        const journey = await apiRequest<{ id: number }>("/api/journeys", {
-          method: "POST",
-          body: JSON.stringify({
-            traveller_name: "DEMO SAMPLE",
-            origin: "Mangaluru, India",
-            destination: "Udupi, India",
-            departure_at: departure.toISOString(),
-            arrive_by: at(14),
-            budget_amount: 5000,
-            budget_currency: "INR",
-            constraints: ["No overnight travel"],
-            pooling_consent: true,
-            passenger_count: 1,
-          }),
-        });
-        journeyId = journey.id;
-        setSelectedJourneyId(String(journey.id));
-        setActiveSection("history");
-
-        completedStep = "adding demo bookings";
-        const train = await apiRequest<JourneyBooking>(`/api/journeys/${journey.id}/bookings`, {
-          method: "POST",
-          body: JSON.stringify({
-            kind: "transport",
-            provider: "SIMULATED Sample Rail",
-            details: "Demo-only train booking; not a real reservation.",
-            origin: "Mangaluru, India",
-            destination: "Udupi, India",
-            scheduled_start: at(8),
-            scheduled_end: at(10),
-            timezone: "Asia/Kolkata",
-            price_amount: 1200,
-            currency: "INR",
-          }),
-        });
-        const cab = await apiRequest<JourneyBooking>(`/api/journeys/${journey.id}/bookings`, {
-          method: "POST",
-          body: JSON.stringify({
-            kind: "transport",
-            provider: "SIMULATED Sample Cab",
-            details: "Demo-only onward pickup; not a real reservation.",
-            origin: "Udupi Station, India",
-            destination: "Udupi Hotel, India",
-            scheduled_start: at(10, 30),
-            scheduled_end: at(11, 30),
-            timezone: "Asia/Kolkata",
-            price_amount: 400,
-            currency: "INR",
-          }),
-        });
-        const hotel = await apiRequest<JourneyBooking>(`/api/journeys/${journey.id}/bookings`, {
-          method: "POST",
-          body: JSON.stringify({
-            kind: "accommodation",
-            provider: "SIMULATED Sample Hotel",
-            details: "Demo-only check-in plan; not a real booking.",
-            origin: "Udupi Hotel, India",
-            scheduled_start: at(13),
-            timezone: "Asia/Kolkata",
-            price_amount: 1800,
-            currency: "INR",
-          }),
-        });
-
-        completedStep = "linking downstream bookings";
-        for (const [predecessorId, downstreamId] of [
-          [train.id, cab.id],
-          [cab.id, hotel.id],
-        ]) {
-          await apiRequest(`/api/journeys/${journey.id}/bookings/${predecessorId}/dependencies`, {
-            method: "POST",
-            body: JSON.stringify({
-              downstream_booking_id: downstreamId,
-              dependency_type: "connection",
-            }),
-          });
-        }
-
-        completedStep = "saving the simulated disruption";
-        await apiRequest("/api/disruptions", {
-          method: "POST",
-          body: JSON.stringify({
-            journey_id: journey.id,
-            title: "SIMULATED train cancellation",
-            description: "Sample disruption for a product demo only. This is not a real operator report.",
-            transport_mode: "train",
-          }),
-        });
-
-        completedStep = "adding a simulated alternative";
-        const alternative = await apiRequest<Alternative>(
-          `/api/journeys/${journey.id}/alternatives`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              mode: "taxi",
-              provider: "SIMULATED shared taxi — demo only",
-              origin: "Mangaluru, India",
-              destination: "Udupi, India",
-              departure_at: at(9),
-              arrival_at: at(12, 45),
-              fare_amount: 3300,
-              currency: "INR",
-              constraints_satisfied: ["No overnight travel"],
-            }),
-          },
-        );
-        if (!alternative.feasible) {
-          throw new Error(`Demo alternative was rejected: ${alternative.rejected_reasons.join(" ")}`);
-        }
-
-        completedStep = "analyzing sample booking impacts";
-        const cascade = await apiRequest<CascadeAnalysis>("/api/v1/disruptions/simulate", {
-          method: "POST",
-          body: JSON.stringify({
-            journey_id: journey.id,
-            affected_booking_id: train.id,
-            disruption_status: "cancelled",
-          }),
-        });
-        completedStep = "saving the sample recovery plan";
-        const itinerary = await apiRequest<RecoveryItinerary>("/api/v1/recovery/generate", {
-          method: "POST",
-          body: JSON.stringify({
-            journey_id: journey.id,
-            affected_booking_id: train.id,
-            disruption_status: "cancelled",
-            selected_alternative_id: alternative.id,
-          }),
-        });
-        const draft = await apiRequest<ActionDraft>("/api/v1/actions/draft", {
-          method: "POST",
-          body: JSON.stringify({
-            action: "hotel_late_checkin",
-            language: "en",
-            provider_name: "SIMULATED Sample Hotel",
-            origin: "Mangaluru, India",
-            destination: "Udupi, India",
-          }),
-        });
-
-        setCascadeAnalysis(cascade);
-        setRecoveryItinerary(itinerary);
-        setSelectedAlternativeId(alternative.id);
-        setActionDraft(draft);
-        setSelectedSavedPlanId(String(itinerary.plan_id));
-        setNotice("Demo sample created and saved. All sample providers, bookings, and transport are simulated—not real.");
-        completedStep = "refreshing saved sample details";
-        await loadDashboard();
-        await loadRecoveryDetails(journey.id);
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : "Unexpected error.";
-        setDemoError(
-          journeyId
-            ? `The demo sample may be partly created while ${completedStep}. The saved trip remains in History. ${detail}`
-            : `Unable to create the demo sample: ${detail}`,
-        );
-        if (journeyId) {
-          setSelectedJourneyId(String(journeyId));
-          setActiveSection("history");
-          try {
-            await Promise.all([loadDashboard(), loadRecoveryDetails(journeyId)]);
-          } catch (refreshError) {
-            const refreshDetail = refreshError instanceof Error
-              ? refreshError.message
-              : "Unable to refresh saved demo details.";
-            setDemoError((current) => `${current} Refresh failed: ${refreshDetail}`);
-          }
-        }
-      } finally {
-        setDemoLoading(false);
-      }
-    }
-
   async function loadRecoveryDetails(journeyId: number) {
     setSelectedJourneyId(String(journeyId));
     const [plan, savedPlans] = await Promise.all([
@@ -829,9 +625,6 @@ export default function Home() {
   const selectedJourney = dashboard?.journeys.find(
     (journey) => String(journey.id) === selectedJourneyId,
   );
-  const hasDemoSample = dashboard?.journeys.some(
-    (journey) => journey.traveller_name === "DEMO SAMPLE",
-  ) ?? false;
   const statusText = loading ? "Connecting" : apiError ? "Needs attention" : "Connected";
 
   if (!authReady) {
@@ -940,7 +733,6 @@ export default function Home() {
           {notice}
         </div>
       )}
-      {demoError && <div className="alert alert-error" role="alert">{demoError}</div>}
 
       <div className="notice-bar">
         <span className="notice-icon">i</span>
@@ -967,14 +759,6 @@ export default function Home() {
             {label}
           </button>
         ))}
-        <button
-          className="button button-primary demo-button"
-          type="button"
-          onClick={() => void createDemoSample()}
-          disabled={demoLoading || loading || !dashboard}
-        >
-          {demoLoading ? "Preparing demo…" : hasDemoSample ? "Open demo sample" : "Load demo sample"}
-        </button>
       </nav>
 
       {activeSection === "overview" && <section className="dashboard-grid">
@@ -1697,15 +1481,15 @@ export default function Home() {
                   >
                     <strong>{journey.origin} → {journey.destination}</strong>
                     <span>{journey.traveller_name} · {formatDate(journey.departure_at)}</span>
-                    {journey.traveller_name === "DEMO SAMPLE" && <span className="tag tag-amber">SIMULATED DEMO</span>}
+                    {journey.traveller_name === "DEMO SAMPLE" && <span className="tag tag-amber">SAMPLE RECORDS · UNVERIFIED</span>}
                   </button>
                 ))}
               </div>
             ) : (
               <div className="history-empty">
-                <p className="empty-copy">No saved trips yet. Load the sample or create a trip to begin.</p>
-                <button className="button button-primary" type="button" onClick={() => void createDemoSample()} disabled={demoLoading || loading || !dashboard}>
-                  {demoLoading ? "Preparing demo…" : hasDemoSample ? "Open demo sample" : "Create sample demo"}
+                <p className="empty-copy">No saved trips yet. Add your real journey details to start your history.</p>
+                <button className="button button-primary" type="button" onClick={() => setActiveSection("trip")}>
+                  Add trip details
                 </button>
               </div>
             )}

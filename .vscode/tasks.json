@@ -130,6 +130,17 @@
 			"problemMatcher": [
 				"$tsc-watch"
 			]
+		},
+		{
+			"label": "Check no demo UI in serving bundle",
+			"type": "shell",
+			"command": "curl.exe",
+			"args": [
+				"-fsS",
+				"http://127.0.0.1:3007/_next/static/chunks/app/page-93683c7c20314cda.js"
+			],
+			"isBackground": false,
+			"problemMatcher": []
 		}
 	]
 }

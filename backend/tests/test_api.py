@@ -378,15 +378,40 @@ def test_cors_allows_bearer_authorization_header():
             base_url="http://test",
         ) as client:
             response = await client.options(
-                "/api/journeys",
+                "/api/auth/login",
                 headers={
-                    "Origin": "http://localhost:3001",
-                    "Access-Control-Request-Method": "GET",
-                    "Access-Control-Request-Headers": "authorization",
+                    "Origin": "http://127.0.0.1:3007",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type,authorization",
                 },
             )
 
         assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:3007"
         assert "authorization" in response.headers["access-control-allow-headers"].casefold()
+        assert "content-type" in response.headers["access-control-allow-headers"].casefold()
 
     asyncio.run(exercise())
+
+
+def test_development_cors_includes_local_preview_origins():
+    settings = Settings(
+        _env_file=None,
+        app_env="development",
+        frontend_origin="https://app.example.test",
+    )
+
+    assert "http://127.0.0.1:3007" in settings.allowed_origins
+    assert "http://localhost:3007" in settings.allowed_origins
+    assert "https://app.example.test" in settings.allowed_origins
+
+
+def test_production_cors_uses_only_configured_origins():
+    settings = Settings(
+        _env_file=None,
+        app_env="production",
+        frontend_origin="https://app.example.test",
+        auth_secret_key="s" * 32,
+    )
+
+    assert settings.allowed_origins == ["https://app.example.test"]
