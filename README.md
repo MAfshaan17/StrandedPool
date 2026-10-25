@@ -133,44 +133,58 @@ flowchart LR
 | Database | Persist trips, bookings, disruptions, and recovery plans |
 | Frontend | Present alerts, alternatives, pooling proposals, and recovery timelines |
 
+## Screenshots
 
-## 📸 Application Screenshots
-
-Here’s a look at the StrandedPool application.
+The StrandedPool interface provides a simple workflow for planning journeys, reporting disruptions, and exploring recovery options.
 
 ### 1. Dashboard
+
 The main dashboard for accessing travel disruption and recovery features.
 
-![StrandedPool Dashboard](frontend/images/dashboard.png)
+<p align="center">
+  <img src="frontend/images/dashboard.png" alt="StrandedPool Dashboard" width="100%">
+</p>
 
 ### 2. Trip Planning
-The trip interface for entering or reviewing journey details.
 
-![StrandedPool Trip Planning](frontend/images/trip.png)
+Enter and review journey details, including the origin, destination, and travel information.
 
-### 3. Disruption History
-View previous or recorded travel disruption information.
+<p align="center">
+  <img src="frontend/images/trip.png" alt="StrandedPool Trip Planning" width="100%">
+</p>
 
-![StrandedPool History](frontend/images/history.png)
+### 3. Recovery Plan
 
-### 4. Recovery Plan
-The recovery interface for exploring travel alternatives and next steps.
+View recovery options and alternative travel arrangements after a disruption.
 
-![StrandedPool Recovery](frontend/images/recovery.png)
+<p align="center">
+  <img src="frontend/images/recovery.png" alt="StrandedPool Recovery Plan" width="100%">
+</p>
+
+### 4. Disruption History
+
+Review previously reported travel disruptions and their details.
+
+<p align="center">
+  <img src="frontend/images/history.png" alt="StrandedPool Disruption History" width="100%">
+</p>
 
 ### 5. Login Page
+
 The login interface for accessing the application.
 
-![StrandedPool Login](frontend/images/loginPage.png)
+<p align="center">
+  <img src="frontend/images/loginPage.png" alt="StrandedPool Login Page" width="100%">
+</p>
 
 ## 🧰 Technology Stack
 
 | Layer | Technologies |
 |---|---|
 | Frontend | Next.js, React, TypeScript, Tailwind CSS |
-| Backend | Python, FastAPI, Pydantic |
-| Persistence | SQLAlchemy, SQLite for local development, PostgreSQL for production where configured |
-| Migrations | Alembic, if configured |
+| Backend | Python, FastAPI, Pydantiocal development, PostgreSQL for production where configured |
+| Migrations | Alembic, if configured |c |
+| Persistence | SQLAlchemy, SQLite for l
 | AI | Gemini API or another configured LLM provider |
 | Optimization | Python; OR-Tools where implemented |
 | Weather | Open-Meteo |
