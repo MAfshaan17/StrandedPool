@@ -1,0 +1,280 @@
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
+).replace(/\/$/, "");
+
+export interface Journey {
+  id: number;
+  traveller_name: string;
+  origin: string;
+  destination: string;
+  departure_at: string;
+  arrive_by: string | null;
+  budget_amount: number | null;
+  budget_currency: string;
+  constraints: string[];
+  pooling_consent: boolean;
+  passenger_count: number;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: "bearer";
+  expires_in: number;
+  user: {
+    id: number;
+    email: string;
+    created_at: string | null;
+  };
+}
+
+export interface Disruption {
+  id: number;
+  journey_id: number | null;
+  title: string;
+  description: string;
+  transport_mode: string | null;
+  status: string;
+  source_label: string;
+  reported_at: string;
+}
+
+export interface Alternative {
+  id: number;
+  journey_id: number;
+  mode: string;
+  provider: string;
+  origin: string;
+  destination: string;
+  departure_at: string | null;
+  arrival_at: string | null;
+  fare_amount: number | null;
+  currency: string;
+  constraints_satisfied: string[];
+  source_label: string;
+  entered_at: string;
+  data_freshness: string;
+  score: number;
+  destination_match: boolean;
+  within_budget: boolean | null;
+  currency_compatible: boolean;
+  arrives_on_time: boolean | null;
+  feasible: boolean;
+  rejected_reasons: string[];
+  reasons: string[];
+}
+
+export interface Dashboard {
+  journey_count: number;
+  disruption_count: number;
+  journeys: Journey[];
+  recent_disruptions: Disruption[];
+  data_notice: string;
+}
+
+export interface JourneyBooking {
+  id: number;
+  journey_id: number;
+  kind: string;
+  provider: string;
+  reference: string | null;
+  details: string | null;
+  origin: string | null;
+  destination: string | null;
+  scheduled_start: string | null;
+  scheduled_end: string | null;
+  timezone: string;
+  latest_acceptable_arrival: string | null;
+  price_amount: number | null;
+  currency: string;
+  status: string;
+  verification_status: string;
+  created_at: string;
+}
+
+export interface BookingDependency {
+  id: number;
+  journey_id: number;
+  predecessor_booking_id: number;
+  downstream_booking_id: number;
+  dependency_type: string;
+}
+
+export interface CascadeAnalysis {
+  status: string;
+  source_label: string;
+  affected_booking_id: number;
+  disruption_status: string;
+  delay_minutes: number | null;
+  impacts: Array<{
+    booking_id: number;
+    kind: string;
+    impact: string;
+    severity: string;
+    directly_affected: boolean;
+    expected_arrival: string | null;
+    reason: string;
+  }>;
+  cycles_detected: Array<{ from_booking_id: number; to_booking_id: number }>;
+  automatically_cancelled_bookings: number[];
+  limitations: string[];
+}
+
+export interface ActionDraft {
+  action: string;
+  language: string;
+  provider_name: string;
+  content: string;
+  source: string;
+  requires_user_review: true;
+  sent: false;
+}
+
+export interface RecoveryItinerary {
+  plan_id: number;
+  created_at: string;
+  source_label: string;
+  verification_status: string;
+  journey: Pick<Journey, "id" | "origin" | "destination" | "departure_at" | "arrive_by">;
+  original_bookings: Array<Pick<
+    JourneyBooking,
+    | "id"
+    | "kind"
+    | "provider"
+    | "origin"
+    | "destination"
+    | "scheduled_start"
+    | "scheduled_end"
+    | "status"
+    | "verification_status"
+  >>;
+  disruption_analysis: CascadeAnalysis | null;
+  proposed_alternative: (Alternative & {
+    status: string;
+    confirmation: string;
+  }) | null;
+  cost_comparison: {
+    status: string;
+    reason?: string;
+    currency?: string;
+    original_amount?: number;
+    proposed_amount?: number;
+    difference?: number;
+    source_label?: string;
+  };
+  required_next_steps: string[];
+  booking_changes_made: false;
+}
+
+export interface SavedRecoveryPlanSummary {
+  plan_id: number;
+  created_at: string;
+  source_label: string;
+  verification_status: string;
+}
+
+export interface RecoveryPlan {
+  journey: Journey;
+  disruptions: Disruption[];
+  bookings: JourneyBooking[];
+  dependencies: BookingDependency[];
+  alternatives: Alternative[];
+  pooling: {
+    status: string;
+    matches: Array<{ passenger_count: number }>;
+    total_consented_passengers: number;
+    availability: string;
+  };
+  next_steps: string[];
+}
+
+export interface TransportSearchResult {
+  status: "provider_unavailable";
+  origin: string;
+  destination: string;
+  provider: null;
+  source_label: string;
+  data_freshness: string;
+  checked_at: string | null;
+  options: never[];
+  message: string;
+}
+
+export interface WeatherHour {
+  time: string;
+  precipitation_probability_percent: number;
+  precipitation_mm: number;
+  wind_speed_kmh: number;
+  weather_code: number;
+  condition: string;
+}
+
+export interface LocationSuggestion {
+  name: string;
+  admin1: string | null;
+  country: string | null;
+  country_code: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface WeatherForecast {
+  status: "available" | "unavailable";
+  source: "Open-Meteo";
+  data_freshness: string;
+  location?: {
+    name: string;
+    country: string | null;
+    latitude: number;
+    longitude: number;
+    timezone: string;
+  };
+  fetched_at?: string;
+  risk: {
+    level: "low" | "moderate" | "high";
+    window_hours: number;
+    drivers: string[];
+    method: string;
+  } | null;
+  hours: WeatherHour[];
+  notice: string;
+}
+
+export async function apiRequest<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  let response: Response;
+  try {
+    const headers = new Headers(init.headers);
+    if (init.body !== undefined && !headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+    if (
+      typeof window !== "undefined" &&
+      !headers.has("Authorization")
+    ) {
+      const token = window.sessionStorage.getItem("strandedpool_access_token");
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+    }
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers,
+      cache: "no-store",
+    });
+  } catch {
+    throw new Error(
+      `Cannot reach the StrandedPool API at ${API_BASE_URL}. Start the backend and check NEXT_PUBLIC_API_BASE_URL.`,
+    );
+  }
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail =
+      body && typeof body.detail === "string"
+        ? body.detail
+        : `API request failed (${response.status})`;
+    throw new Error(detail);
+  }
+  return body as T;
+}

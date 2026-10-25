@@ -1,0 +1,135 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Install StrandedPool backend dependencies",
+			"type": "shell",
+			"command": "D:\\StrandedPool\\backend\\.venv\\Scripts\\python.exe",
+			"args": [
+				"-m",
+				"pip",
+				"install",
+				"-r",
+				"D:\\StrandedPool\\backend\\requirements.txt"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Apply StrandedPool database migrations",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d D:\\StrandedPool\\backend && D:\\StrandedPool\\backend\\.venv\\Scripts\\alembic.exe upgrade head"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Run StrandedPool backend tests",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d D:\\StrandedPool\\backend && D:\\StrandedPool\\backend\\.venv\\Scripts\\python.exe -m pytest -q --basetemp=D:\\StrandedPool\\backend\\.pytest-tmp tests"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Build StrandedPool frontend",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d D:\\StrandedPool\\frontend && npm run build"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Check StrandedPool migration parity",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d D:\\StrandedPool\\backend && D:\\StrandedPool\\backend\\.venv\\Scripts\\alembic.exe check"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Start StrandedPool backend",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d D:\\StrandedPool\\backend && D:\\StrandedPool\\backend\\.venv\\Scripts\\uvicorn.exe app.main:app --host 127.0.0.1 --port 8000"
+			],
+			"isBackground": true,
+			"problemMatcher": [
+				"$tsc-watch"
+			]
+		},
+		{
+			"label": "Start StrandedPool frontend",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d D:\\StrandedPool\\frontend && npm run start -- --hostname 127.0.0.1 --port 3002"
+			],
+			"isBackground": true,
+			"problemMatcher": [
+				"$tsc-watch"
+			]
+		},
+		{
+			"label": "Lint StrandedPool frontend",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d D:\\StrandedPool\\frontend && npm run lint"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Install StrandedPool frontend lint dependencies",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d D:\\StrandedPool\\frontend && npm install"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Validate StrandedPool frontend lint",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d D:\\StrandedPool\\frontend && npm run lint"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Start updated StrandedPool UI preview",
+			"type": "shell",
+			"command": "cmd.exe",
+			"args": [
+				"/c",
+				"cd /d D:\\StrandedPool\\frontend && npm run start -- --hostname 127.0.0.1 --port 3006"
+			],
+			"isBackground": true,
+			"problemMatcher": [
+				"$tsc-watch"
+			]
+		}
+	]
+}

@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "strandedpool-backend"
+version = "0.1.0"
+description = "Backend for StrandedPool"
+authors = ["Your Name <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.0"
+uvicorn = { extras = ["standard"], version = "^0.30.0" }
+sqlalchemy = { version = "^2.1.0", extras = ["asyncio"] }
+aiosqlite = "^0.21.0"
+pydantic = "^2.14.0"
+pydantic-settings = "^2.16.0"
+alembic = "^1.20.0"
+python-dotenv = "^1.2.2"
+asyncpg = "^0.31.0"
+psycopg = { extras = ["binary"], version = "^3.2.9" }
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.4.0"
+httpx = "^0.27.0"
